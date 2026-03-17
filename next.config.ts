@@ -1,23 +1,26 @@
 import type { NextConfig } from 'next';
 import path from 'path';
 
-const isProd = process.env.NODE_ENV === 'production';
-
 const nextConfig: NextConfig = {
+  // Vercel expects root paths, so no basePath/assetPrefix
   output: 'export',
-  basePath: isProd ? '/NEULib' : '',
-  assetPrefix: isProd ? '/NEULib' : '',
+
+  // Ignore type and lint errors during build (optional)
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
+
+  // Image handling
   images: {
-    unoptimized: true,
+    unoptimized: true, // required for static export
     remotePatterns: [
-      { protocol: 'https', hostname: 'placehold.co', pathname: '/**' },
+      { protocol: 'https', hostname: 'placehold.co',        pathname: '/**' },
       { protocol: 'https', hostname: 'images.unsplash.com', pathname: '/**' },
-      { protocol: 'https', hostname: 'picsum.photos', pathname: '/**' },
-      { protocol: 'https', hostname: 'www.gstatic.com', pathname: '/**' },
+      { protocol: 'https', hostname: 'picsum.photos',       pathname: '/**' },
+      { protocol: 'https', hostname: 'www.gstatic.com',     pathname: '/**' },
     ],
   },
+
+  // Turbopack config
   turbopack: {
     root: path.resolve(__dirname),
   },
