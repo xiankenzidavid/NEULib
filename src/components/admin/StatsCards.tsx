@@ -72,7 +72,7 @@ export function StatsCards() {
   if (logsLoading) {
     return (
       <div className="space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="h-40 bg-white/30 backdrop-blur-3xl rounded-[2.5rem] animate-pulse" />
           ))}
@@ -145,20 +145,21 @@ export function StatsCards() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
         {stats.map((stat, i) => (
           <div key={i} className="smart-stat-card group">
-            <div className="flex items-start justify-between mb-6">
-              <div className={`p-5 rounded-2xl ${stat.color} text-white shadow-2xl shadow-primary/20 transition-transform group-hover:scale-110`}>
-                <stat.icon size={32} />
+            <div className="flex items-start justify-between mb-3 sm:mb-6">
+              <div className={`p-3 sm:p-5 rounded-2xl ${stat.color} text-white shadow-2xl shadow-primary/20 transition-transform group-hover:scale-110`}>
+                <stat.icon size={22} className="sm:hidden" />
+                <stat.icon size={32} className="hidden sm:block" />
               </div>
-              <span className="text-xs font-bold text-slate-400 bg-white/30 backdrop-blur-sm px-4 py-1.5 rounded-full uppercase tracking-widest border border-white/20">
+              <span className="text-[10px] sm:text-xs font-bold text-slate-400 bg-white/30 backdrop-blur-sm px-2 sm:px-4 py-1 sm:py-1.5 rounded-full uppercase tracking-widest border border-white/20 text-right leading-tight">
                 {stat.trend}
               </span>
             </div>
-            <div className="space-y-2">
-              <p className="text-sm font-bold text-slate-500 uppercase tracking-wide">{stat.title}</p>
-              <h3 className="text-4xl font-bold font-headline truncate text-slate-900">{stat.value}</h3>
+            <div className="space-y-1 sm:space-y-2">
+              <p className="text-[10px] sm:text-sm font-bold text-slate-500 uppercase tracking-wide leading-tight">{stat.title}</p>
+              <h3 className="text-2xl sm:text-4xl font-bold font-headline truncate text-slate-900">{stat.value}</h3>
             </div>
           </div>
         ))}

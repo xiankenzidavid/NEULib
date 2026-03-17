@@ -51,22 +51,22 @@ export function LiveFeed() {
             </div>
           ) : (
             <div>
-              {/* Column headers */}
-              <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-2 px-4 py-2 border-b border-slate-100 bg-slate-50/80">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Name / Dept</span>
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Student ID</span>
+              {/* Column headers — mobile: 3 cols, desktop: 5 cols */}
+              <div className="grid grid-cols-[2fr_1fr_1fr] sm:grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-2 px-4 py-2 border-b border-slate-100 bg-slate-50/80">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Name</span>
                 <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Purpose</span>
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Time In</span>
                 <span className="text-xs font-bold uppercase tracking-wide text-slate-400 text-right">Status</span>
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-400 hidden sm:block">Student ID</span>
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-400 text-right hidden sm:block">Time In</span>
               </div>
               <div className="divide-y divide-slate-50">
                 {recentLogs.map((log) => {
                   const isNoTap = !log.checkOutTimestamp && !isToday(parseISO(log.checkInTimestamp));
                   return (
-                    <div key={log.id} className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-2 px-4 py-3 items-center hover:bg-slate-50/60 transition-colors">
+                    <div key={log.id} className="grid grid-cols-[2fr_1fr_1fr] sm:grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-2 px-4 py-3 items-center hover:bg-slate-50/60 transition-colors">
                       {/* Name + Dept */}
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-sm flex-shrink-0">
+                      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-sm flex-shrink-0">
                           {(log.studentName || 'S').charAt(0)}
                         </div>
                         <div className="min-w-0">
@@ -74,19 +74,11 @@ export function LiveFeed() {
                           <p className="text-xs font-medium text-slate-400 truncate">{DEPARTMENTS[log.deptID] || log.deptID}</p>
                         </div>
                       </div>
-                      {/* Student ID */}
-                      <span className="text-xs font-bold text-slate-500 truncate" style={{ fontFamily: "'DM Mono',monospace" }}>
-                        {log.studentId}
-                      </span>
-                      {/* Purpose */}
-                      <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary/5 text-primary w-fit">
+                      {/* Purpose — always visible */}
+                      <span className="text-xs font-semibold px-2 py-1 rounded-full bg-primary/5 text-primary w-fit truncate">
                         {log.purpose}
                       </span>
-                      {/* Time In */}
-                      <span className="text-xs font-medium text-slate-500">
-                        {format(parseISO(log.checkInTimestamp), 'MMM d, h:mm a')}
-                      </span>
-                      {/* Status */}
+                      {/* Status — always visible */}
                       <div className="flex justify-end">
                         {log.checkOutTimestamp ? (
                           <span className="text-xs font-bold px-2 py-1 rounded-full bg-slate-100 text-slate-500">Done</span>
@@ -96,6 +88,14 @@ export function LiveFeed() {
                           <span className="text-xs font-bold px-2 py-1 rounded-full bg-blue-50 text-blue-600 animate-pulse">Active</span>
                         )}
                       </div>
+                      {/* Student ID — desktop only */}
+                      <span className="text-xs font-bold text-slate-500 truncate hidden sm:block" style={{ fontFamily: "'DM Mono',monospace" }}>
+                        {log.studentId}
+                      </span>
+                      {/* Time In — desktop only */}
+                      <span className="text-xs font-medium text-slate-500 hidden sm:block">
+                        {format(parseISO(log.checkInTimestamp), 'MMM d, h:mm a')}
+                      </span>
                     </div>
                   );
                 })}
@@ -106,4 +106,4 @@ export function LiveFeed() {
       </CardContent>
     </Card>
   );
-} 
+}

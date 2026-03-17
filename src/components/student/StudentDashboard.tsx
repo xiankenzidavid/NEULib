@@ -1,9 +1,6 @@
 "use client";
 
-
-
-
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,12 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query, where, orderBy, limit, setDoc, doc, getDocs, updateDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, setDoc, doc, getDocs } from 'firebase/firestore';
 import {
   LogOut, Clock, History, Activity, Loader2, Flame, Menu, X as XIcon,
   LayoutDashboard, TrendingUp, LogIn, Sparkles,
   BookOpen, ArrowLeft, BookMarked, UserCircle2,
-  IdCard, GraduationCap, Building2, Mail, ArrowUpDown, ArrowUp, ArrowDown, Search, Bell, CheckCircle, ShieldCheck
+  IdCard, GraduationCap, Building2, Mail, ArrowUpDown, ArrowUp, ArrowDown, Search, Bell, CheckCircle, ShieldCheck, FileEdit
 } from 'lucide-react';
 import {
   format, parseISO, isToday, differenceInMinutes,
@@ -24,7 +21,8 @@ import {
 } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
 import { UserRecord, StudentRecord, LibraryLogRecord, DEPARTMENTS, ProgramRecord, toStudentRecord } from '@/lib/firebase-schema';
-
+import { CredentialRequestModal } from '@/components/student/CredentialRequestModal';
+import { OccupancyVerificationDialog } from '@/components/student/OccupancyVerificationDialog';
 
 // ── Standalone History Tab with sortable table ──────────────────────────────
 function HistoryTab({ logs, cardStyle }: { logs: LibraryLogRecord[]; cardStyle: React.CSSProperties }) {
@@ -215,7 +213,7 @@ export default function StudentDashboard({ onExit, resolvedUser, onSwitchToAdmin
     } catch {}
   };
 
-    const { data: logs } = useCollection<LibraryLogRecord>(logsQ);
+  const { data: logs } = useCollection<LibraryLogRecord>(logsQ);
 
   // Fetch program record for display in profile tab
   const programsQ = useMemoFirebase(
@@ -268,6 +266,36 @@ export default function StudentDashboard({ onExit, resolvedUser, onSwitchToAdmin
     };
   }, [logs, startDate, endDate]);
 
+  // ── 3-hour occupancy verification trigger ─────────────────────────────────
+  const verifyTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [showVerifyDialog, setShowVerifyDialog] = useState(false);
+  const [verifyLogId, setVerifyLogId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!logs || !profile) return;
+    const activeLog = logs.find(l => !l.checkOutTimestamp && isToday(parseISO(l.checkInTimestamp)));
+    if (!activeLog) {
+      if (verifyTimerRef.current) { clearTimeout(verifyTimerRef.current); verifyTimerRef.current = null; }
+      return;
+    }
+    const THREE_HOURS = 3 * 60 * 60 * 1000;
+    const elapsed     = Date.now() - parseISO(activeLog.checkInTimestamp).getTime();
+    const blocksPassed = Math.floor(elapsed / THREE_HOURS);
+    const msUntilNext  = THREE_HOURS - (elapsed % THREE_HOURS);
+
+    if (blocksPassed >= 1 && !showVerifyDialog) {
+      setVerifyLogId(activeLog.id);
+      setShowVerifyDialog(true);
+    }
+    if (verifyTimerRef.current) clearTimeout(verifyTimerRef.current);
+    verifyTimerRef.current = setTimeout(() => {
+      setVerifyLogId(activeLog.id);
+      setShowVerifyDialog(true);
+    }, msUntilNext);
+
+    return () => { if (verifyTimerRef.current) clearTimeout(verifyTimerRef.current); };
+  }, [logs, profile, showVerifyDialog]);
+
   // ── Visit streak calculation — must be before any early returns ──────────
   const { currentStreak, longestStreak } = useMemo(() => {
     if (!logs || logs.length === 0) return { currentStreak: 0, longestStreak: 0 };
@@ -305,45 +333,50 @@ export default function StudentDashboard({ onExit, resolvedUser, onSwitchToAdmin
     return { currentStreak: current, longestStreak: longest };
   }, [logs]);
 
-  // ── Self-service tap-out — must be before any early returns ──────────────
-  const handleSelfTapOut = async (logId: string, notifId: string, sentAt: string) => {
-    if (!db) return;
-    try {
-      await updateDoc(doc(db, 'library_logs', logId), { checkOutTimestamp: sentAt });
-      await setDoc(doc(db, 'notifications', notifId), { read: true }, { merge: true });
-      toast({ title: 'Checked Out', description: 'Your session has been closed. Thank you!' });
-    } catch {
-      toast({ title: 'Could not update session', variant: 'destructive' });
-    }
-  };
-
   // ── Admin bypass — fetch admin record if email matches /admins ──
   // Use resolvedUser directly if it's admin — avoids async flash to "Identity Not Found"
   const resolvedIsAdmin = resolvedUser && (resolvedUser.role === 'admin' || resolvedUser.role === 'super_admin');
-  const [isAdminEmail,  setIsAdminEmail]  = useState(!!resolvedIsAdmin);
-  const [confirmSwitch, setConfirmSwitch] = useState(false);
-  const [menuOpen,      setMenuOpen]      = useState(false);
-  const [adminRecord, setAdminRecord]   = useState<any>(resolvedIsAdmin ? resolvedUser : null);
+
+  // ── Persistence fix: restore from sessionStorage so refresh doesn't lose admin state ──
+  const storedAdminRecord = (() => {
+    try { const s = sessionStorage.getItem('neu_admin_record'); return s ? JSON.parse(s) : null; } catch { return null; }
+  })();
+  const storedIsAdmin = (() => {
+    try { return sessionStorage.getItem('neu_is_admin') === 'true'; } catch { return false; }
+  })();
+
+  const [isAdminEmailRaw,  setIsAdminEmailRaw]  = useState<boolean>(!!resolvedIsAdmin || storedIsAdmin);
+  const [confirmSwitch,    setConfirmSwitch]     = useState(false);
+  const [menuOpen,         setMenuOpen]          = useState(false);
+  const [credRequestOpen,  setCredRequestOpen]   = useState(false);
+  const [adminRecord,   setAdminRecordRaw]   = useState<any>(resolvedIsAdmin ? resolvedUser : storedAdminRecord);
+
+  const isAdminEmail = isAdminEmailRaw;
+  const setIsAdminEmail = (v: boolean) => {
+    setIsAdminEmailRaw(v);
+    try { sessionStorage.setItem('neu_is_admin', String(v)); } catch {}
+  };
+  const setAdminRecord = (v: any) => {
+    setAdminRecordRaw(v);
+    try { if (v) sessionStorage.setItem('neu_admin_record', JSON.stringify(v)); else sessionStorage.removeItem('neu_admin_record'); } catch {}
+  };
+
   useEffect(() => {
-    // If resolvedUser is already admin, skip the lookup
     if (resolvedUser && (resolvedUser.role === 'admin' || resolvedUser.role === 'super_admin')) {
       setIsAdminEmail(true);
       setAdminRecord(resolvedUser);
       return;
     }
-    if (!user?.email || profile) { setIsAdminEmail(false); setAdminRecord(null); return; }
+    // Use cached value on refresh — only re-query when no cached state exists
+    if (storedIsAdmin && storedAdminRecord) return;
+    if (!user?.email) { setIsAdminEmail(false); setAdminRecord(null); return; }
     getDocs(query(collection(db, 'users'), where('email', '==', user.email), where('role', 'in', ['admin', 'super_admin']), limit(1)))
       .then(snap => {
-        if (!snap.empty) {
-          setIsAdminEmail(true);
-          setAdminRecord(snap.docs[0].data());
-        } else {
-          setIsAdminEmail(false);
-          setAdminRecord(null);
-        }
+        if (!snap.empty) { setIsAdminEmail(true); setAdminRecord(snap.docs[0].data()); }
+        else             { setIsAdminEmail(false); setAdminRecord(null); }
       })
       .catch(() => { setIsAdminEmail(false); setAdminRecord(null); });
-  }, [user?.email, profile, db, resolvedUser]);
+  }, [user?.email, db, resolvedUser]); // removed `profile` — that was the cause of the bail bug
 
   // ── Loading — wait for auth, profile, AND admin-email check ──
   if (isUserLoading || isProfileLoading) {
@@ -409,7 +442,6 @@ export default function StudentDashboard({ onExit, resolvedUser, onSwitchToAdmin
     { id: 'messages',  label: 'Messages',  icon: Bell },
     { id: 'profile',   label: 'Profile',   icon: UserCircle2 },
   ];
-
 
   const navyGrad = 'linear-gradient(135deg,hsl(221,72%,18%),hsl(221,72%,24%))'; 
   const cardStyle = {
@@ -483,7 +515,6 @@ export default function StudentDashboard({ onExit, resolvedUser, onSwitchToAdmin
                 <span className="text-white/30">|</span>
                 <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold" style={{ background: 'rgba(255,255,255,0.9)', color: 'hsl(221,72%,22%)' }}>Student</span>
               </button>
-
             </>
           )}
           <button onClick={onExit}
@@ -553,7 +584,7 @@ export default function StudentDashboard({ onExit, resolvedUser, onSwitchToAdmin
               </div>
 
               {/* Nav items */}
-              <nav className="flex-1 p-3 overflow-y-auto space-y-0.5">
+              <nav className="flex-1 p-3 overflow-y-auto space-y-0.5" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.2) transparent" }}>
                 {navItems.map(item => (
                   <button key={item.id}
                     onClick={() => { setActiveTab(item.id as any); setMenuOpen(false); }}
@@ -598,7 +629,7 @@ export default function StudentDashboard({ onExit, resolvedUser, onSwitchToAdmin
         )}
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 lg:pb-6 space-y-4 sm:space-y-5">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 lg:pb-6 space-y-4 sm:space-y-5" style={{ scrollbarWidth: "thin", scrollbarColor: "hsl(221,72%,70%) transparent" }}>
           <div key={activeTab} className="animate-in fade-in duration-200">
 
           {/* ── OVERVIEW ── */}
@@ -944,21 +975,7 @@ export default function StudentDashboard({ onExit, resolvedUser, onSwitchToAdmin
                           </span>
                         </div>
                         <p className="text-slate-800 text-sm font-medium leading-relaxed">{n.message}</p>
-                        {!n.read && n.type === 'no_tap_warning' && n.logId && (
-                          <div className="mt-2 flex items-center gap-2 flex-wrap">
-                            <button
-                              onClick={() => handleSelfTapOut(n.logId, n.id, n.sentAt)}
-                              className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg transition-all active:scale-95"
-                              style={{ background: 'rgba(5,150,105,0.1)', color: '#059669' }}>
-                              <CheckCircle size={12} /> I Have Already Left
-                            </button>
-                            <button onClick={() => markRead(n.id)}
-                              className="flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-slate-600 transition-colors">
-                              <CheckCircle size={12} /> Just mark read
-                            </button>
-                          </div>
-                        )}
-                        {!n.read && n.type !== 'no_tap_warning' && (
+                        {!n.read && (
                           <button onClick={() => markRead(n.id)}
                             className="mt-2 flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-slate-600 transition-colors">
                             <CheckCircle size={12} /> Mark as read
@@ -1062,6 +1079,16 @@ export default function StudentDashboard({ onExit, resolvedUser, onSwitchToAdmin
 
               </div>
 
+              {/* Request Credential Change */}
+              {profile && (
+                <button
+                  onClick={() => setCredRequestOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl font-bold text-sm text-white transition-all active:scale-95"
+                  style={{ background: `linear-gradient(135deg,hsl(221,72%,22%),hsl(221,60%,32%))` }}>
+                  <FileEdit size={16} /> Request Credential Change
+                </button>
+              )}
+
               {/* Activity Summary */}
               <div style={cardStyle} className="p-4">
                 <p className="font-bold text-slate-900 text-xl mb-4" style={{fontFamily:"'Playfair Display',serif"}}>Activity Summary</p>
@@ -1125,6 +1152,29 @@ export default function StudentDashboard({ onExit, resolvedUser, onSwitchToAdmin
             </div>
           </div>
         </div>
+      )}
+
+      {/* 3-hour occupancy verification dialog */}
+      {showVerifyDialog && verifyLogId && profile && (
+        <OccupancyVerificationDialog
+          logId={verifyLogId}
+          studentName={displayName}
+          checkInTime={logs?.find(l => l.id === verifyLogId)?.checkInTimestamp || new Date().toISOString()}
+          onStillHere={() => {
+            setShowVerifyDialog(false);
+            if (verifyTimerRef.current) clearTimeout(verifyTimerRef.current);
+            verifyTimerRef.current = setTimeout(() => setShowVerifyDialog(true), 3 * 60 * 60 * 1000);
+          }}
+          onCheckOut={() => { setShowVerifyDialog(false); setVerifyLogId(null); }}
+        />
+      )}
+
+      {/* Credential change request modal */}
+      {credRequestOpen && profile && (
+        <CredentialRequestModal
+          profile={profile}
+          onClose={() => setCredRequestOpen(false)}
+        />
       )}
     </div>
   );

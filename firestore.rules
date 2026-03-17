@@ -81,5 +81,13 @@ service cloud.firestore {
       allow update: if false;
       allow delete: if isNEUEmail() || isOwnerEmail();
     }
+    // /credential_requests — student-initiated credential change requests
+    // Students can create; NEU staff and the requesting student can read/update
+    match /credential_requests/{reqId} {
+      allow read:   if isAuthenticatedUser();
+      allow create: if isSignedIn();
+      allow update: if isNEUEmail() || isOwnerEmail();
+      allow delete: if isOwnerEmail();
+    }
   }
 }

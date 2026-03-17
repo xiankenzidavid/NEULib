@@ -5,9 +5,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { format, parseISO, isToday, differenceInMinutes } from 'date-fns';
-import { Loader2, Users, Search, Filter, Radio, Clock } from 'lucide-react';
+import { Loader2, Users, Search, Filter, Radio, Clock, Bell } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { useUser } from '@/firebase';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query, orderBy } from 'firebase/firestore';
+import { collection, query, orderBy, addDoc, doc, updateDoc } from 'firebase/firestore';
 import { LibraryLogRecord, DepartmentRecord } from '@/lib/firebase-schema';
 
 const navy = 'hsl(221,72%,22%)';
@@ -23,7 +25,26 @@ const PURPOSES = ['All Purposes', 'Reading Books', 'Research', 'Computer Use', '
 
 export function CurrentVisitors() {
   const db  = useFirestore();
+  const { toast } = useToast();
   const [now, setNow] = useState(new Date());
+  const [sendingVerify, setSendingVerify] = useState<string | null>(null);
+
+  const sendVerificationPrompt = async (log: LibraryLogRecord) => {
+    setSendingVerify(log.id);
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        studentId:   log.studentId,
+        type:        'occupancy_verify',
+        logId:       log.id,
+        message:     `Occupancy Check: You have been in the library for an extended period. Please confirm you are still present or your session will be marked as a missed tap-out.`,
+        sentAt:      new Date().toISOString(),
+        read:        false,
+      });
+      toast({ title: 'Verification prompt sent', description: `Sent to ${log.studentName}.` });
+    } catch {
+      toast({ title: 'Failed to send', variant: 'destructive' });
+    } finally { setSendingVerify(null); }
+  };
 
 
   // Filters
@@ -197,7 +218,7 @@ export function CurrentVisitors() {
                   <TableHead className={thStyle}>Purpose</TableHead>
                   <TableHead className={thStyle}>Time In</TableHead>
                   <TableHead className={thStyle}>Time Inside</TableHead>
-                  <TableHead className={`text-right pr-5 ${thStyle}`}>Status</TableHead>
+                  <TableHead className={`text-right pr-5 ${thStyle}`}>Status / Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -258,18 +279,28 @@ export function CurrentVisitors() {
                         </span>
                       </TableCell>
 
-                      {/* Status + Duration */}
+                      {/* Status + Verify action */}
                       <TableCell className="text-right pr-5">
-                        <div className="flex items-center justify-end gap-2">
-                          <span className="text-xs font-bold" style={{ color: navy, fontFamily: "'DM Mono',monospace" }}>
-                            {dur}
-                          </span>
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
                           {isInside ? (
-                            <span className="text-sm font-bold px-3 py-1.5 rounded-full flex items-center gap-1"
-                              style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6' }}>
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse inline-block" />
-                              Inside
-                            </span>
+                            <>
+                              <span className="text-sm font-bold px-3 py-1.5 rounded-full flex items-center gap-1"
+                                style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6' }}>
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse inline-block" />
+                                Inside
+                              </span>
+                              <button
+                                onClick={() => sendVerificationPrompt(log)}
+                                disabled={sendingVerify === log.id}
+                                title="Send occupancy verification prompt to student"
+                                className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-xl border transition-all active:scale-95 disabled:opacity-50"
+                                style={{ borderColor: 'hsl(43,85%,55%)', color: 'hsl(38,90%,40%)', background: 'hsl(43,85%,55%,0.08)' }}>
+                                {sendingVerify === log.id
+                                  ? <Loader2 size={11} className="animate-spin" />
+                                  : <Bell size={11} />}
+                                Verify
+                              </button>
+                            </>
                           ) : (
                             <span className="text-sm font-bold px-3 py-1.5 rounded-full bg-slate-100 text-slate-500">
                               Done
