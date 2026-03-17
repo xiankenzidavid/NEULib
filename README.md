@@ -7,6 +7,9 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38B2AC?style=for-the-badge&logo=tailwind-css)](https://tailwindcss.com/)
 [![Deployed on GitHub Pages](https://img.shields.io/badge/Deployed-GitHub%20Pages-222?style=for-the-badge&logo=github)](https://shawndavidsdomingo.github.io/NEULib/)
 
+[![NEU Library Vercel](https://img.shields.io/badge/NEU%20Library-Vercel-red?logo=vercel&style=plastic)](https://neu-library.vercel.app/)
+
+
 > **Institutional Presence & Visitor Management System for the New Era University Library**
 
 **Live Site → [https://shawndavidsdomingo.github.io/NEULib/](https://shawndavidsdomingo.github.io/NEULib/)**
