@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, query, orderBy, doc, updateDoc, addDoc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, doc, updateDoc, addDoc, getDoc, setDoc, deleteDoc, writeBatch, getDocs, where, limit } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { writeAuditLog } from '@/lib/audit-logger';
 
@@ -127,14 +127,34 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
         // Student ID: doc ID IS the student ID, so we must copy to new doc + delete old
         const newId = req.requested.studentId;
         if (!newId) throw new Error('No new studentId in request');
-        // 1. Read the current user doc
-        const oldSnap = await getDoc(doc(db, 'users', req.studentId));
-        if (!oldSnap.exists()) throw new Error('Original user doc not found');
-        const oldData = oldSnap.data();
+        // 1. Read the current user doc — try by doc ID first, then fall back to email query
+        let oldSnap = await getDoc(doc(db, 'users', req.studentId));
+        if (!oldSnap.exists() && req.email) {
+          // Fallback: studentId field in the request may be stale; look up by email
+          const emailQ = await getDocs(query(collection(db, 'users'), where('email', '==', req.email), limit(1)));
+          if (!emailQ.empty) oldSnap = emailQ.docs[0] as any;
+        }
+        if (!oldSnap.exists()) throw new Error(`User doc not found for ID "${req.studentId}" or email "${req.email}"`);
+        const oldData  = oldSnap.data();
+        const actualDocId = oldSnap.id; // use the real Firestore doc ID, not req.studentId
         // 2. Write to new doc with updated ID fields
-        await setDoc(doc(db, 'users', newId), { ...oldData, id: newId, studentId: newId });
-        // 3. Delete old doc
-        await deleteDoc(doc(db, 'users', req.studentId));
+        await setDoc(doc(db, 'users', newId), { ...oldData, id: newId }); // write new doc
+        // 3. Cascade-update all library_logs (static imports — no dynamic import())
+        try {
+          const logsSnap = await getDocs(
+            query(collection(db, 'library_logs'), where('studentId', '==', actualDocId), limit(500))
+          );
+          if (!logsSnap.empty) {
+            const batch = writeBatch(db);
+            logsSnap.docs.forEach(logDoc => batch.update(logDoc.ref, { studentId: newId }));
+            await batch.commit();
+          }
+        } catch (cascadeErr) {
+          console.warn('[CredentialRequestsTab] cascade log update failed:', cascadeErr);
+        }
+
+        // 4. Delete old user doc
+        await deleteDoc(doc(db, 'users', actualDocId)); // delete using actual doc ID
         // 4. Update request as approved
         await updateDoc(ref, { status: 'approved', updatedAt: new Date().toISOString() });
         await sendStudentNotif(newId, `Your Student ID change request has been approved. Your new ID is ${newId}. Please use this ID to log in going forward.`);
@@ -143,8 +163,11 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
 
       toast({ title: 'Request Approved', description: 'Student has been notified.' });
       onDone();
-    } catch { toast({ title: 'Error', variant: 'destructive' }); }
-    finally { setSaving(false); }
+    } catch (err: any) {
+      const msg = err?.message || err?.code || 'Unknown error';
+      console.error('[handleApprove]', msg, err);
+      toast({ title: 'Error', description: msg, variant: 'destructive' });
+    } finally { setSaving(false); }
   };
 
   const handleRevoke = async () => {
@@ -157,8 +180,11 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
       writeAuditLog(db, user, 'user.edit', { targetId: req.studentId, targetName: req.studentName, detail: `Credential request revoked: ${reason}` });
       toast({ title: 'Request Revoked', description: 'Student has been notified.' });
       onDone();
-    } catch { toast({ title: 'Error', variant: 'destructive' }); }
-    finally { setSaving(false); }
+    } catch (err: any) {
+      const msg = err?.message || err?.code || 'Unknown error';
+      console.error('[handleRevoke]', msg, err);
+      toast({ title: 'Error', description: msg, variant: 'destructive' });
+    } finally { setSaving(false); }
   };
 
   const handleToggleVerified = async () => {

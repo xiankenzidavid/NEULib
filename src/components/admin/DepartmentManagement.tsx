@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -42,6 +42,10 @@ export function DepartmentManagement() {
   const [editingProgId,   setEditingProgId]   = useState<string | null>(null);
   const [editProgName,    setEditProgName]     = useState('');
   const [editProgCode,    setEditProgCode]     = useState('');
+  // ── Confirmation modal state ─────────────────────────────────────────────
+  const [confirmModal, setConfirmModal] = useState<{
+    open: boolean; type: 'dept' | 'program'; id: string; name: string;
+  } | null>(null);
 
   const { toast } = useToast();
   const db = useFirestore();
@@ -73,11 +77,21 @@ export function DepartmentManagement() {
   };
 
   const handleDeleteDept = (id: string, name: string) => {
-    if (!confirm(`Delete department "${name}"? This will NOT delete its programs.`)) return;
-    deleteDocumentNonBlocking(doc(db, 'departments', id));
-    if (expandedDept === id) setExpandedDept(null);
-    toast({ title: "Department Removed" });
+    setConfirmModal({ open: true, type: 'dept', id, name });
   };
+
+  const executeDelete = useCallback(() => {
+    if (!confirmModal) return;
+    if (confirmModal.type === 'dept') {
+      deleteDocumentNonBlocking(doc(db, 'departments', confirmModal.id));
+      if (expandedDept === confirmModal.id) setExpandedDept(null);
+      toast({ title: 'Department Removed' });
+    } else {
+      deleteDocumentNonBlocking(doc(db, 'programs', confirmModal.id));
+      toast({ title: 'Program Removed' });
+    }
+    setConfirmModal(null);
+  }, [confirmModal, db, expandedDept]);
 
   const handleSeedDepts = async () => {
     setIsSeeding(true);
@@ -133,9 +147,7 @@ export function DepartmentManagement() {
   };
 
   const handleDeleteProgram = (id: string, name: string) => {
-    if (!confirm(`Remove program "${name}"?`)) return;
-    deleteDocumentNonBlocking(doc(db, 'programs', id));
-    toast({ title: "Program Removed" });
+    setConfirmModal({ open: true, type: 'program', id, name });
   };
 
   const startEditProgram = (prog: ProgramRecord) => {
@@ -435,6 +447,44 @@ export function DepartmentManagement() {
           </TableBody>
         </Table>
       </div>
+      {/* ── Confirmation Modal ── */}
+      {confirmModal?.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(8px)', animation: 'fadeIn 0.2s ease-out' }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden"
+            style={{ animation: 'scaleIn 0.25s ease-out' }}>
+            <div className="px-7 py-6 border-b border-slate-100 text-center">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                style={{ background: 'rgba(220,38,38,0.08)' }}>
+                <Trash2 size={22} className="text-red-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900" style={{ fontFamily: "'Playfair Display',serif" }}>
+                Confirm Delete
+              </h3>
+              <p className="text-slate-500 text-sm mt-2 leading-relaxed">
+                Are you sure you want to delete{' '}
+                <strong className="text-slate-800">"{confirmModal.name}"</strong>?{' '}
+                This action cannot be undone and may affect associated student records.
+              </p>
+            </div>
+            <div className="px-7 py-5 flex gap-3">
+              <button onClick={() => setConfirmModal(null)}
+                className="flex-1 h-11 rounded-2xl font-semibold text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 transition-all active:scale-95">
+                Cancel
+              </button>
+              <button onClick={executeDelete}
+                className="flex-1 h-11 rounded-2xl font-bold text-sm text-white transition-all active:scale-95"
+                style={{ background: 'linear-gradient(135deg,#dc2626,#b91c1c)', boxShadow: '0 4px 14px rgba(220,38,38,0.3)' }}>
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+          <style>{`
+            @keyframes fadeIn  { from{opacity:0} to{opacity:1} }
+            @keyframes scaleIn { from{opacity:0;transform:scale(0.92)} to{opacity:1;transform:scale(1)} }
+          `}</style>
+        </div>
+      )}
     </div>
   );
 }

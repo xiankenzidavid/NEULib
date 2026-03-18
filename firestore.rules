@@ -37,7 +37,7 @@ service cloud.firestore {
       allow update: if isOwnerEmail() ||
                        isNEUEmail() ||
                        (isAuthenticatedUser() && resource.data.email == request.auth.token.email);
-      allow delete: if isNEUEmail() || isOwnerEmail();
+      allow delete: if isNEUEmail() || isOwnerEmail() || isAuthenticatedUser();
     }
 
     match /departments/{deptID} {

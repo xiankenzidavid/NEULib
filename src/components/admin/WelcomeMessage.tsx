@@ -50,29 +50,28 @@ export default function WelcomeMessage({ adminUser, onDismiss }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+      style={{ background: 'rgba(30,41,59,0.60)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}>
       <div className="w-full max-w-md animate-in zoom-in-95 duration-500"
         style={{ fontFamily: "'DM Sans',sans-serif" }}>
 
         {/* Card */}
-        <div className="rounded-3xl overflow-hidden shadow-2xl">
+        <div className="rounded-3xl overflow-hidden shadow-2xl" style={{ background: '#ffffff', border: '1px solid rgba(226,232,240,0.8)', transition: 'transform 0.3s ease-in-out' }}>
 
-          {/* Header — clean white with navy accent */}
-          <div className="px-8 pt-8 pb-6 text-center border-b border-slate-100">
-            {/* Avatar */}
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center font-bold text-xl text-white mx-auto mb-4"
-              style={{ background: 'linear-gradient(135deg,hsl(43,85%,52%),hsl(38,90%,44%))' }}>
+          {/* Header — solid white, gold avatar */}
+          <div className="px-8 pt-8 pb-6 text-center border-b border-slate-100" style={{ background: '#ffffff' }}>
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center font-bold text-xl text-white mx-auto mb-4 shadow-lg"
+              style={{ background: 'linear-gradient(135deg,hsl(43,85%,55%),hsl(38,90%,45%))' }}>
               {initials}
             </div>
-            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">{greeting}</p>
+            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em] mb-1">{greeting}</p>
             <h1 className="text-2xl font-bold text-slate-900" style={{ fontFamily: "'Playfair Display',serif" }}>
               {displayName}
             </h1>
-            <p className="text-slate-500 text-sm font-semibold mt-1">{role}</p>
+            <p className="text-slate-400 text-sm font-semibold mt-0.5">{role}</p>
           </div>
 
           {/* Stats */}
-          <div className="bg-white px-8 py-6 space-y-4">
+          <div className="px-8 py-6 space-y-4" style={{ background: '#ffffff' }}>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
               {format(new Date(), 'EEEE, MMMM d, yyyy')}
             </p>

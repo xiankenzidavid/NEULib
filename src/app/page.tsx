@@ -88,21 +88,22 @@ export default function Home() {
   }, [user, isUserLoading, hydrated]);
 
   async function resolveUserByEmail(email: string): Promise<UserRecord | null> {
-    // Retry up to 3 times with backoff — Firebase auth token sometimes takes
-    // a moment to propagate to Firestore after signInWithPopup resolves.
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const snap = await getDocs(query(collection(db, 'users'), where('email', '==', email), limit(1)));
-        if (!snap.empty) return snap.docs[0].data() as UserRecord;
-        // Found nothing — could be a new user, return null after first clean success
+        if (!snap.empty) {
+          const docSnap = snap.docs[0];
+          const data = docSnap.data() as UserRecord;
+          // Always use the Firestore doc ID as the canonical id —
+          // the stored 'id' field may be stale or empty if written before the fix
+          return { ...data, id: docSnap.id };
+        }
         return null;
       } catch (err: any) {
-        // If it's a permissions error and we have retries left, wait and retry
         if ((err?.code === 'permission-denied' || err?.message?.includes('permission')) && attempt < 2) {
           await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
           continue;
         }
-        // Any other error or out of retries — treat as no record found
         console.warn('[resolveUserByEmail] attempt', attempt + 1, 'failed:', err?.code || err?.message);
         return null;
       }

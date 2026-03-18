@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, addDoc, query, where } from 'firebase/firestore';
 import { UserRecord, DEPARTMENTS, ProgramRecord } from '@/lib/firebase-schema';
+import { formatStudentId } from '@/lib/student-id-formatter';
 import { useToast } from '@/hooks/use-toast';
 
 interface Props {
@@ -51,6 +52,9 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
   // Departments
   const deptsRef = useMemoFirebase(() => collection(db, 'departments'), [db]);
   const { data: depts } = useCollection<{ deptID: string; departmentName: string }>(deptsRef);
+
+  // Student ID auto-dash formatter — global utility ensures identical behaviour to Kiosk
+  const handleIdChange = (raw: string) => setNewId(formatStudentId(raw));
 
   const handleSubmit = async () => {
     if (!type) return;
@@ -213,7 +217,7 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
 
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1">New Student ID <span className="text-red-400">*</span></label>
-                <Input value={newId} onChange={e => setNewId(e.target.value)} placeholder="YY-XXXXX-ZZZ"
+                <Input value={newId} onChange={e => handleIdChange(e.target.value)} placeholder="YY-XXXXX-ZZZ"
                   className="h-10 rounded-xl bg-slate-50 border-slate-200 text-sm font-mono" />
               </div>
               <div>
