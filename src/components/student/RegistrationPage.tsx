@@ -39,10 +39,18 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
   // Load departments
   useEffect(() => {
     getDocs(collection(db, 'departments'))
-      .then(snap => setAllDepts(
-        snap.docs.map(d => d.data() as { deptID: string; departmentName: string })
-          .sort((a, b) => a.departmentName.localeCompare(b.departmentName))
-      ));
+      .then(snap => {
+        const depts = snap.docs
+          .map(d => d.data() as { deptID: string; departmentName: string })
+          .sort((a, b) => a.departmentName.localeCompare(b.departmentName));
+        // Pin STAFF to the top
+        const staffIdx = depts.findIndex(d => d.deptID === 'STAFF' || d.departmentName.toUpperCase().includes('STAFF'));
+        if (staffIdx > 0) {
+          const [staff] = depts.splice(staffIdx, 1);
+          depts.unshift(staff);
+        }
+        setAllDepts(depts);
+      });
   }, [db]);
 
   // Load programs when dept changes
@@ -51,10 +59,18 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
     setLoadingProgs(true);
     setProgram('');
     getDocs(query(collection(db, 'programs'), where('deptID', '==', deptId)))
-      .then(snap => setPrograms(
-        snap.docs.map(d => ({ id: d.id, ...d.data() } as ProgramRecord))
-          .sort((a, b) => a.code.localeCompare(b.code))
-      ))
+      .then(snap => {
+        const progs = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as ProgramRecord))
+          .sort((a, b) => a.code.localeCompare(b.code));
+        // Pin STAFF program to top if present
+        const staffIdx = progs.findIndex(p => p.code.toUpperCase().includes('STAFF') || p.name.toUpperCase().includes('STAFF'));
+        if (staffIdx > 0) {
+          const [staff] = progs.splice(staffIdx, 1);
+          progs.unshift(staff);
+        }
+        setPrograms(progs);
+      })
       .finally(() => setLoadingProgs(false));
   }, [deptId, db]);
 
@@ -71,14 +87,14 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
     }
   }, [nameMode, user?.displayName]);
 
-  // Auto-format student ID as user types (insert dashes)
+  // Auto-format student ID: clean-then-format to avoid double-dash bugs
+  // Format: XX-XXXXX-XXX (2-5-3). Always strip all non-digits first.
   const handleIdChange = (raw: string) => {
-    const digits = raw.replace(/\D/g, '');
-    let formatted = digits;
-    if (digits.length > 2)  formatted = digits.slice(0, 2) + '-' + digits.slice(2);
-    if (digits.length > 7)  formatted = formatted.slice(0, 9) + '-' + digits.slice(7);
-    if (digits.length > 10) formatted = formatted.slice(0, 13); // cap at XX-XXXXX-XXX
-    setStudentId(formatted);
+    const digits = raw.replace(/[^0-9]/g, '').slice(0, 10); // cap at 10 raw digits
+    let out = digits;
+    if (digits.length > 2) out = digits.slice(0, 2) + '-' + digits.slice(2);
+    if (digits.length > 7) out = digits.slice(0, 2) + '-' + digits.slice(2, 7) + '-' + digits.slice(7);
+    setStudentId(out);
     setError('');
   };
 
@@ -132,7 +148,7 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
   if (done) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6" style={{ fontFamily: "'DM Sans',sans-serif" }}>
-        <div className="bg-white/95 rounded-3xl shadow-2xl p-10 w-full max-w-md text-center space-y-6 animate-in zoom-in duration-500">
+        <div className="bg-white rounded-3xl shadow-xl p-10 w-full max-w-md text-center space-y-6 animate-in zoom-in duration-500" style={{ border: '1px solid #e2e8f0' }}>
           <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto"
             style={{ background: 'rgba(5,150,105,0.1)' }}>
             <CheckCircle2 size={40} className="text-emerald-600" />
@@ -169,8 +185,8 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
           <p className="text-white/60 text-sm font-medium">{user?.email}</p>
         </div>
 
-        <div className="bg-white/97 rounded-2xl shadow-2xl p-6 space-y-5"
-          style={{ backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.9)' }}>
+        <div className="bg-white rounded-2xl shadow-xl p-6 space-y-5"
+          style={{ border: '1px solid #e2e8f0' }}>
 
           {/* Step 1: Name source */}
           <div>

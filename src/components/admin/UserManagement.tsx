@@ -316,21 +316,23 @@ const getRoleBadge = (s: StudentRecord) => s.role === 'admin' || s.role === 'sup
                     onClick={() => toggleSort('role')}>
                     Role <SortIcon field="role" />
                   </TableHead>
-                  <TableHead className={thStyle}>Status</TableHead>
-                  <TableHead className={`text-right pr-5 ${thStyle}`}>Actions</TableHead>
+                  <TableHead className={thStyle}>Access</TableHead>
+                  <TableHead className={`text-center ${thStyle}`}>Edit</TableHead>
+                  <TableHead className={`text-center ${thStyle}`}>Admin Access</TableHead>
+                  <TableHead className={`text-center ${thStyle}`}>Remove</TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-40 text-center">
+                    <TableCell colSpan={8} className="h-40 text-center">
                       <Loader2 className="animate-spin inline-block" style={{ color: navy }} size={24} />
                     </TableCell>
                   </TableRow>
                 ) : processedStudents.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-40 text-center text-slate-400 text-sm italic font-medium">
+                    <TableCell colSpan={8} className="h-40 text-center text-slate-400 text-sm italic font-medium">
                       No matching records.
                     </TableCell>
                   </TableRow>
@@ -407,64 +409,70 @@ const getRoleBadge = (s: StudentRecord) => s.role === 'admin' || s.role === 'sup
                             </span>
                           )}
                         </TableCell>
-                        {/* Status */}
-                        <TableCell>
-                          <div>
-                            {s.status === 'blocked' ? (
-                              <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-red-50 text-red-500 border border-red-100">
-                                Blocked
-                              </span>
-                            ) : (
-                              <span className="text-xs font-bold px-3 py-1.5 rounded-full border"
-                                style={{ background: `${navy}08`, color: navy, borderColor: `${navy}20` }}>
-                                Active
-                              </span>
-                            )}
-                          </div>
+                        {/* Access (was Status) */}
+                        <TableCell className="align-middle">
+                          {s.status === 'blocked' ? (
+                            <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-red-50 text-red-500 border border-red-100">
+                              Blocked
+                            </span>
+                          ) : (
+                            <span className="text-xs font-bold px-3 py-1.5 rounded-full border"
+                              style={{ background: `${navy}08`, color: navy, borderColor: `${navy}20` }}>
+                              Active
+                            </span>
+                          )}
                         </TableCell>
 
-                        {/* Actions */}
-                        <TableCell className="text-right pr-5">
-                          <div className="flex items-center justify-end gap-2">
+                        {/* Edit */}
+                        <TableCell className="text-center align-middle">
+                          <button
+                            onClick={() => { setEditingStudent(s); setIsDialogOpen(true); }}
+                            title="Edit"
+                            className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-all active:scale-95 mx-auto">
+                            <Edit2 size={16} />
+                          </button>
+                        </TableCell>
+
+                        {/* Admin Access */}
+                        <TableCell className="text-center align-middle">
+                          {isSuperAdmin ? (
                             <button
-                              onClick={() => { setEditingStudent(s); setIsDialogOpen(true); }}
-                              className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-all active:scale-95">
-                              <Edit2 size={16} />
+                              title={s.role === 'admin' || s.role === 'super_admin' ? 'Revoke Admin' : 'Grant Admin'}
+                              onClick={() => {
+                                const newRole = (s.role === 'admin' || s.role === 'super_admin') ? 'student' : 'admin';
+                                updateDocumentNonBlocking(doc(db, 'users', s.id), { role: newRole });
+                                writeAuditLog(db, user, newRole === 'admin' ? 'role.promote' : 'role.demote', {
+                                  targetId:   s.id,
+                                  targetName: `${s.firstName} ${s.lastName}`,
+                                  detail:     `Role changed to ${newRole}`,
+                                });
+                                toast({ title: newRole === 'admin' ? 'Admin access granted' : 'Reverted to Student', description: `${s.firstName} ${s.lastName}` });
+                              }}
+                              className="text-xs font-bold px-2.5 py-1 rounded-lg border transition-all active:scale-95 mx-auto block"
+                              style={
+                                (s.role === 'admin' || s.role === 'super_admin')
+                                  ? { background: 'hsl(221,72%,22%,0.08)', color: 'hsl(221,72%,22%)', borderColor: 'hsl(221,72%,22%,0.2)' }
+                                  : { background: '#f8fafc', color: '#64748b', borderColor: '#e2e8f0' }
+                              }>
+                              {(s.role === 'admin' || s.role === 'super_admin') ? '−Admin' : '+Admin'}
                             </button>
-                            <div className="flex items-center gap-2">
-                            {/* Quick role toggle — student ↔ admin */}
-                            {isSuperAdmin && (
-                              <button
-                                title={s.role === 'admin' || s.role === 'super_admin' ? 'Revoke admin — set back to Student' : 'Grant admin access'}
-                                onClick={() => {
-                                  const newRole = (s.role === 'admin' || s.role === 'super_admin') ? 'student' : 'admin';
-                                  updateDocumentNonBlocking(doc(db, 'users', s.id), { role: newRole });
-                                  writeAuditLog(db, user, newRole === 'admin' ? 'role.promote' : 'role.demote', {
-                                    targetId:   s.id,
-                                    targetName: `${s.firstName} ${s.lastName}`,
-                                    detail:     `Role changed to ${newRole}`,
-                                  });
-                                  toast({ title: newRole === 'admin' ? 'Admin access granted' : 'Reverted to Student', description: `${s.firstName} ${s.lastName}` });
-                                }}
-                                className="text-xs font-bold px-2.5 py-1 rounded-lg border transition-all active:scale-95"
-                                style={
-                                  (s.role === 'admin' || s.role === 'super_admin')
-                                    ? { background: 'hsl(221,72%,22%,0.08)', color: 'hsl(221,72%,22%)', borderColor: 'hsl(221,72%,22%,0.2)' }
-                                    : { background: '#f8fafc', color: '#64748b', borderColor: '#e2e8f0' }
-                                }>
-                                {(s.role === 'admin' || s.role === 'super_admin') ? '−Admin' : '+Admin'}
-                              </button>
-                            )}
+                          ) : (
                             <Switch checked={s.status !== 'blocked'} onCheckedChange={() => toggleBlockStatus(s.id, s.status === 'blocked')} />
-                          </div>
-                            {isSuperAdmin && (
-                              <button
-                                onClick={() => { setStudentToDelete({ id: s.id, name: s.firstName }); setIsDeleteAlertOpen(true); }}
-                                className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all active:scale-95">
-                                <Trash2 size={16} />
-                              </button>
-                            )}
-                          </div>
+                          )}
+                        </TableCell>
+
+                        {/* Remove */}
+                        <TableCell className="text-center align-middle">
+                          {isSuperAdmin ? (
+                            <button
+                              title="Remove"
+                              onClick={() => { setStudentToDelete({ id: s.id, name: s.firstName }); setIsDeleteAlertOpen(true); }}
+                              className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all active:scale-95 mx-auto">
+                              <Trash2 size={16} />
+                            </button>
+                          ) : (
+                            <span className="text-slate-200 text-xs">—</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     );
@@ -484,16 +492,16 @@ const getRoleBadge = (s: StudentRecord) => s.role === 'admin' || s.role === 'sup
           <AlertDialogContent className="rounded-2xl p-6 w-[calc(100vw-2rem)] max-w-sm mx-auto border-red-100">
             <AlertDialogHeader>
               <AlertDialogTitle className="text-red-600 font-bold text-lg" style={{ fontFamily: "'Playfair Display',serif" }}>
-                Delete Student Record
+                Confirm Remove
               </AlertDialogTitle>
               <AlertDialogDescription className="text-slate-600 text-sm leading-relaxed">
-                Permanently remove <strong>{studentToDelete?.name}</strong>'s record? This cannot be undone.
+                Are you sure you want to remove <strong>{studentToDelete?.name}</strong>'s record? This action cannot be undone and may affect associated library logs.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter className="pt-4 flex-row gap-2">
               <AlertDialogCancel className="flex-1 rounded-xl h-11 font-semibold text-sm">Cancel</AlertDialogCancel>
               <AlertDialogAction onClick={confirmDelete}
-                className="flex-1 bg-red-600 text-white rounded-xl h-11 font-semibold text-sm">
+                className="flex-1 rounded-xl h-11 font-semibold text-sm text-white" style={{ background: 'linear-gradient(135deg,#dc2626,#b91c1c)' }}>
                 Delete
               </AlertDialogAction>
             </AlertDialogFooter>

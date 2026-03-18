@@ -564,7 +564,6 @@ export default function TerminalView({ onComplete, onAdminReturn }: { onComplete
                 {/* Countdown */}
                 <div className="flex items-center justify-center gap-3 text-white/60 text-sm font-semibold">
                   <span className="text-white font-extrabold text-xl" style={{ fontFamily: "'DM Mono',monospace" }}>{countdown}</span>
-                  <span>Auto-reset in {countdown}s</span>
                 </div>
                 {/* Skip */}
                 <button onClick={handleReset}

@@ -20,7 +20,6 @@ import { useFirestore, useCollection, useMemoFirebase, deleteDocumentNonBlocking
 import { collection, doc } from 'firebase/firestore';
 import { LibraryLogRecord, DepartmentRecord, ProgramRecord } from '@/lib/firebase-schema';
 
-const PURPOSES = ["All Purposes", "Reading Books", "Research", "Computer Use", "Assignments"];
 const PRESETS = [
   { label: 'Today',      getStart: () => format(new Date(), 'yyyy-MM-dd'),                             getEnd: () => format(new Date(), 'yyyy-MM-dd') },
   { label: 'This Week',  getStart: () => format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd'), getEnd: () => format(new Date(), 'yyyy-MM-dd') },
@@ -56,6 +55,21 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
   const [filtersOpen,   setFiltersOpen]   = useState(true);
   const [topVisitorsOpen,  setTopVisitorsOpen]  = useState(true);
+  // ── Dynamic purposes from Firestore (replaces hardcoded list) ────────────
+  const purposesRef = useMemoFirebase(() => collection(db, 'visit_purposes'), [db]);
+  const { data: livePurposeDocs } = useCollection<{ id: string; label: string; value: string; active: boolean }>(purposesRef);
+  const dynamicPurposes = useMemo(() => {
+    const base = ['All Purposes'];
+    if (!livePurposeDocs || livePurposeDocs.length === 0) {
+      return [...base, 'Reading Books', 'Research', 'Computer Use', 'Assignments'];
+    }
+    const active = livePurposeDocs
+      .filter(p => p.active !== false)
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map(p => p.label);
+    return [...base, ...active];
+  }, [livePurposeDocs]);
+
   const [tapOutFilter,  setTapOutFilter]  = useState<'all' | 'no_tap' | 'with_timeout'>('all');
   const [archiveSearch,    setArchiveSearch]    = useState('');
   const [archiveSortField, setArchiveSortField] = useState<'checkInTimestamp' | 'studentName' | 'deptID' | 'purpose' | 'duration' | 'studentId' | 'checkOutTimestamp' | 'program'>('checkInTimestamp');
@@ -429,7 +443,7 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
-                    {PURPOSES.map(p => <SelectItem key={p} value={p} className="font-semibold text-sm">{p}</SelectItem>)}
+                    {dynamicPurposes.map(p => <SelectItem key={p} value={p} className="font-semibold text-sm">{p}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

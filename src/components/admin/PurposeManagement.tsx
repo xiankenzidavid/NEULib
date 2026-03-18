@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus, Trash2, Loader2, Search, Edit2, Check, X, BookOpen, GripVertical } from 'lucide-react';
@@ -10,6 +10,7 @@ import {
   setDocumentNonBlocking, deleteDocumentNonBlocking, updateDocumentNonBlocking,
 } from '@/firebase';
 import { doc, collection, setDoc } from 'firebase/firestore';
+import { writeAuditLog } from '@/lib/audit-logger';
 
 interface VisitPurpose {
   id:      string;   // doc ID = slug e.g. "reading-books"
@@ -42,6 +43,7 @@ function toSlug(s: string) {
 export function PurposeManagement() {
   const db = useFirestore();
   const { toast } = useToast();
+  const { user } = useUser();
 
   const [newLabel,    setNewLabel]    = useState('');
   const [searchTerm,  setSearchTerm]  = useState('');
@@ -69,6 +71,7 @@ export function PurposeManagement() {
       id, label, value: label, order, active: true,
     });
     toast({ title: 'Purpose Added', description: `"${label}" is now available in the kiosk.` });
+    writeAuditLog(db, user, 'purpose.add', { detail: `Admin added purpose: "${label}"` });
     setNewLabel('');
   };
 
@@ -79,10 +82,16 @@ export function PurposeManagement() {
   };
 
   const handleDelete = (p: VisitPurpose) => {
-    if (!confirm(`Delete "${p.label}"? Existing logs using this purpose will NOT be affected.`)) return;
-    deleteDocumentNonBlocking(doc(db, 'visit_purposes', p.id));
-    toast({ title: 'Purpose Deleted' });
+    setConfirmDeletePurpose({ id: p.id, label: p.label });
   };
+
+  const executeDeletePurpose = useCallback(() => {
+    if (!confirmDeletePurpose) return;
+    deleteDocumentNonBlocking(doc(db, 'visit_purposes', confirmDeletePurpose.id));
+    writeAuditLog(db, user, 'purpose.remove', { detail: `Admin removed purpose: "${confirmDeletePurpose.label}"` });
+    toast({ title: 'Purpose Removed', description: `"${confirmDeletePurpose.label}" removed from kiosk.` });
+    setConfirmDeletePurpose(null);
+  }, [confirmDeletePurpose, db, user]);
 
   const handleSaveEdit = (id: string) => {
     const label = editLabel.trim();
@@ -281,5 +290,44 @@ export function PurposeManagement() {
         </div>
       </div>
     </div>
-  );
+
+
+      {/* ── Confirm Delete Purpose Modal ── */}
+      {confirmDeletePurpose && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(8px)', animation: 'fadeIn 0.2s ease-out' }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden"
+            style={{ animation: 'scaleIn 0.25s ease-out' }}>
+            <div className="px-7 py-6 border-b border-slate-100 text-center">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                style={{ background: 'rgba(220,38,38,0.08)' }}>
+                <Trash2 size={22} className="text-red-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900" style={{ fontFamily: "'Playfair Display',serif" }}>
+                Confirm Remove
+              </h3>
+              <p className="text-slate-500 text-sm mt-2 leading-relaxed">
+                Are you sure you want to remove{' '}
+                <strong className="text-slate-800">"{confirmDeletePurpose.label}"</strong>?
+                Existing logs using this purpose will not be affected.
+              </p>
+            </div>
+            <div className="px-7 py-5 flex gap-3">
+              <button onClick={() => setConfirmDeletePurpose(null)}
+                className="flex-1 h-11 rounded-2xl font-semibold text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 transition-all active:scale-95">
+                Cancel
+              </button>
+              <button onClick={executeDeletePurpose}
+                className="flex-1 h-11 rounded-2xl font-bold text-sm text-white transition-all active:scale-95"
+                style={{ background: 'linear-gradient(135deg,#dc2626,#b91c1c)', boxShadow: '0 4px 14px rgba(220,38,38,0.3)' }}>
+                Confirm Remove
+              </button>
+            </div>
+          </div>
+          <style>{`
+            @keyframes fadeIn  { from{opacity:0} to{opacity:1} }
+            @keyframes scaleIn { from{opacity:0;transform:scale(0.92)} to{opacity:1;transform:scale(1)} }
+          `}</style>
+        </div>
+      )}  );
 }
