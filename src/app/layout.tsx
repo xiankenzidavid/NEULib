@@ -6,8 +6,6 @@ import { Toaster } from '@/components/ui/toaster';
 export const metadata: Metadata = {
   title: 'NEU Library Portal',
   description: 'Visitor Log and Management System for NEU Library',
-  // Next.js App Router auto-serves src/app/favicon.ico as the favicon
-  // No manual <link> or metadata.icons needed
 };
 
 export const viewport = {
@@ -30,17 +28,28 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         />
       </head>
       <body className="antialiased min-h-screen" style={{ fontFamily: "'DM Sans',sans-serif" }}>
-        {/* Background: hardcoded /NEULib prefix for GitHub Pages */}
+        {/* Fixed background image — path is now relative to /public, no basePath prefix needed */}
         <div style={{ position: 'fixed', inset: 0, zIndex: -50 }}>
           <img
             src="/neulibrary.jpg"
             alt=""
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center' }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              objectPosition: 'center',
+            }}
           />
-          <div style={{
-            position: 'absolute', inset: 0,
-            background: 'linear-gradient(160deg,rgba(10,26,77,0.52) 0%,rgba(10,26,77,0.28) 50%,rgba(10,26,77,0.44) 100%)',
-          }} />
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background:
+                'linear-gradient(160deg,rgba(10,26,77,0.52) 0%,rgba(10,26,77,0.28) 50%,rgba(10,26,77,0.44) 100%)',
+            }}
+          />
         </div>
 
         <FirebaseClientProvider>

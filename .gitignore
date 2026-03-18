@@ -45,3 +45,25 @@ firebase-debug.log
 firestore-debug.log
 # Firebase service account key — NEVER commit this
 serviceAccountKey.json
+
+# Missing from your current .gitignore
+
+# Firebase emulator artifacts
+.firebase/
+firebase-debug.*.log
+ui-debug.log
+
+# Environment files (your .env* covers most, but be explicit)
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS artifacts
+Thumbs.db
+
+# Editor artifacts
+.vscode/
+.idea/
+*.swp
+*.swo

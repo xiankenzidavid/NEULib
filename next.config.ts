@@ -2,16 +2,12 @@ import type { NextConfig } from 'next';
 import path from 'path';
 
 const nextConfig: NextConfig = {
-  // Vercel expects root paths, so no basePath/assetPrefix
-  output: 'export',
-
-  // Ignore type and lint errors during build (optional)
   typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true },
+  eslint:     { ignoreDuringBuilds: true },
 
-  // Image handling
   images: {
-    unoptimized: true, // required for static export
+    unoptimized: true,
+    qualities: [75, 85, 90, 95, 100],
     remotePatterns: [
       { protocol: 'https', hostname: 'placehold.co',        pathname: '/**' },
       { protocol: 'https', hostname: 'images.unsplash.com', pathname: '/**' },
@@ -20,7 +16,6 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  // Turbopack config
   turbopack: {
     root: path.resolve(__dirname),
   },
