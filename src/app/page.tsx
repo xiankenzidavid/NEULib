@@ -358,7 +358,7 @@ export default function Home() {
       <header className="relative z-10 px-4 sm:px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="neu-seal flex-shrink-0 overflow-hidden" style={{ width: 36, height: 36, padding: 0 }}>
-            <img src="/NEULib/neu_logo.png" alt="NEU" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+            <img src="/neu_logo.png" alt="NEU" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
           </div>
           <span className="text-white font-bold text-sm hidden sm:block" style={{ letterSpacing: '0.06em' }}>New Era University</span>
         </div>
@@ -414,14 +414,34 @@ export default function Home() {
           {/* Register */}
           <button onClick={handleRegisterClick} disabled={isAuthenticating}
             className="flex items-center justify-center gap-2 h-12 rounded-2xl font-bold text-sm transition-all active:scale-95 disabled:opacity-60"
-            style={{ background: 'rgba(255,255,255,0.13)', backdropFilter: 'blur(10px)', color: 'white', border: '1px solid rgba(255,255,255,0.25)' }}>
+            style={{ background: 'rgba(255,255,255,0.13)', backdropFilter: 'blur(10px)', color: 'white', border: '1px solid rgba(255,255,255,0.25)' }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.25)';
+              (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(255,255,255,0.55)';
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 4px 20px rgba(0,0,0,0.2)';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.13)';
+              (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(255,255,255,0.25)';
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = 'none';
+            }}>
             {isAuthenticating ? <Loader2 size={15} className="animate-spin" /> : <UserCircle size={15} />}
             Register
           </button>
           {/* Request Credential */}
           <button onClick={() => setIsCredAuthOpen(true)} disabled={isAuthenticating}
             className="flex items-center justify-center gap-2 h-12 rounded-2xl font-bold text-sm transition-all active:scale-95 disabled:opacity-60"
-            style={{ background: 'rgba(255,255,255,0.13)', backdropFilter: 'blur(10px)', color: 'white', border: '1px solid rgba(255,255,255,0.25)' }}>
+            style={{ background: 'rgba(255,255,255,0.13)', backdropFilter: 'blur(10px)', color: 'white', border: '1px solid rgba(255,255,255,0.25)' }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.25)';
+              (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(255,255,255,0.55)';
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 4px 20px rgba(0,0,0,0.2)';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.13)';
+              (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(255,255,255,0.25)';
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = 'none';
+            }}>
             <FileEdit size={15} />
             Request Credential
           </button>

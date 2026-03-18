@@ -103,7 +103,7 @@ export const DEPARTMENT_LIST = Object.entries(DEPARTMENTS).map(([deptID, departm
 export const PROGRAMS: Record<string, ProgramEntry[]> = {
   LIBRARY:  [{ code: 'LIBRARY-STAFF', name: 'Staff/Faculty' }],
 
-  ABM:  [{ code: 'BSA-STAFF', name: 'Staff/Faculty' }, 
+  ABM:  [{ code: 'ABM-STAFF', name: 'Staff/Faculty' }, 
         { code: 'BSA', name: 'Bachelor of Science in Accountancy' }, 
         { code: 'BSAIS', name: 'Bachelor of Science in Accounting Information System' }],
 
