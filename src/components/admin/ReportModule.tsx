@@ -55,6 +55,14 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
   const [filtersOpen,   setFiltersOpen]   = useState(true);
   const [topVisitorsOpen,  setTopVisitorsOpen]  = useState(true);
+  const [tapOutFilter,  setTapOutFilter]  = useState<'all' | 'no_tap' | 'with_timeout'>('all');
+  const [archiveSearch,    setArchiveSearch]    = useState('');
+  const [archiveSortField, setArchiveSortField] = useState<'checkInTimestamp' | 'studentName' | 'deptID' | 'purpose' | 'duration' | 'studentId' | 'checkOutTimestamp' | 'program'>('checkInTimestamp');
+  const [archiveSortOrder, setArchiveSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  const { toast } = useToast();
+  const db = useFirestore();
+
   // ── Dynamic purposes from Firestore (replaces hardcoded list) ────────────
   const purposesRef = useMemoFirebase(() => collection(db, 'visit_purposes'), [db]);
   const { data: livePurposeDocs } = useCollection<{ id: string; label: string; value: string; active: boolean }>(purposesRef);
@@ -70,13 +78,6 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
     return [...base, ...active];
   }, [livePurposeDocs]);
 
-  const [tapOutFilter,  setTapOutFilter]  = useState<'all' | 'no_tap' | 'with_timeout'>('all');
-  const [archiveSearch,    setArchiveSearch]    = useState('');
-  const [archiveSortField, setArchiveSortField] = useState<'checkInTimestamp' | 'studentName' | 'deptID' | 'purpose' | 'duration' | 'studentId' | 'checkOutTimestamp' | 'program'>('checkInTimestamp');
-  const [archiveSortOrder, setArchiveSortOrder] = useState<'asc' | 'desc'>('desc');
-
-  const { toast } = useToast();
-  const db = useFirestore();
 
   const deptQuery = useMemoFirebase(() => collection(db, 'departments'), [db]);
   const { data: dbDepartments } = useCollection<DepartmentRecord>(deptQuery);
