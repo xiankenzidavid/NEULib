@@ -161,7 +161,7 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
         writeAuditLog(db, user, 'user.edit', { targetId: newId, targetName: req.studentName, detail: `Student ID changed from ${req.studentId} to ${newId}` });
       }
 
-      toast({ title: 'Request Approved', description: 'Student has been notified.' });
+      toast({ title: 'Request Approved'});
       onDone();
     } catch (err: any) {
       const msg = err?.message || err?.code || 'Unknown error';
@@ -178,7 +178,7 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
       await updateDoc(doc(db, 'credential_requests', req.id), { status: 'revoked', adminNote: reason, updatedAt: new Date().toISOString() });
       await sendStudentNotif(req.studentId, `Your credential change request has been revoked. Reason: ${reason}`);
       writeAuditLog(db, user, 'user.edit', { targetId: req.studentId, targetName: req.studentName, detail: `Credential request revoked: ${reason}` });
-      toast({ title: 'Request Revoked', description: 'Student has been notified.' });
+      toast({ title: 'Request Revoked'});
       onDone();
     } catch (err: any) {
       const msg = err?.message || err?.code || 'Unknown error';
