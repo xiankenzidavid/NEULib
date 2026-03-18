@@ -9,7 +9,6 @@
 
 [![NEU Library Vercel](https://img.shields.io/badge/NEU%20Library-Vercel-red?logo=vercel&style=plastic)](https://neu-library.vercel.app/)
 
-
 > **Institutional Presence & Visitor Management System for the New Era University Library**
 
 **Live Site → [https://shawndavidsdomingo.github.io/NEULib/](https://shawndavidsdomingo.github.io/NEULib/)**
@@ -76,7 +75,9 @@ The system is deployed as a **static export** on GitHub Pages and communicates d
 | 📤 CSV Export | Download full or filtered registry as a CSV file |
 | 🔍 Audit Log | Immutable record of every admin action with actor, target, timestamp |
 | 🔥 Visit Streak | Students see current and best consecutive visit streaks |
-| 🚪 Self-Service Tap-Out | Students can self-close missed sessions from notifications |
+| 📋 Credential Requests | Students request name/ID/dept changes; admins review with granular approval |
+| ⏱ Occupancy Verification | 3-hour auto-prompt confirms presence; admin can manually trigger at any time |
+| 🔴 Request Notification Dot | Red badge on Requests nav item counts pending credential change requests |
 | ⚠️ Missed Tap-Out Tab | Full management table for students who forgot to check out |
 | 🕐 Live Clock | Real-time clock displayed across all dashboards |
 | 📱 Responsive | Fully mobile-responsive with a bottom navigation bar |
@@ -122,22 +123,22 @@ The system is deployed as a **static export** on GitHub Pages and communicates d
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      GitHub Pages (CDN)                      │
-│              Next.js 15 Static Export (/NEULib/)             │
+│                      GitHub Pages (CDN)                     │
+│              Next.js 15 Static Export (/NEULib/)            │
 └────────────────────────────┬────────────────────────────────┘
                              │ HTTPS
           ┌──────────────────┴───────────────────┐
           │                                       │
    ┌──────▼──────┐                       ┌───────▼───────┐
-   │  Firebase   │                       │  Google Gemini │
-   │    Auth     │                       │   (Genkit AI)  │
-   │  Firestore  │                       │  Visit Summary │
+   │  Firebase   │                       │ Google Gemini │
+   │    Auth     │                       │  (Genkit AI)  │
+   │  Firestore  │                       │ Visit Summary │
    └──────┬──────┘                       └───────────────┘
           │ Real-time listeners (onSnapshot)
    ┌──────▼────────────────────────────────────────┐
-   │              Firestore Collections             │
-   │  /users   /library_logs   /departments         │
-   │  /programs  /notifications                     │
+   │              Firestore Collections            │
+   │  /users   /library_logs   /departments        │
+   │  /programs  /notifications                    │
    └───────────────────────────────────────────────┘
 ```
 
@@ -381,7 +382,7 @@ All staff tabs **plus** additional exclusive tabs:
 
 ## Firestore Data Schema
 
-All users are stored in a **single unified collection** (`/users`). Document IDs are the user's institutional ID, not the Firebase UID.
+All users are stored in a **single unified collection** (`/users`). Document IDs are the user's institutional ID (e.g. `24-12864-481`), not the Firebase UID.
 
 ### `/users/{id}`
 
@@ -449,6 +450,31 @@ interface VisitPurpose {
   active:  boolean;  // whether shown in kiosk
 }
 ```
+
+### `/credential_requests/{reqId}`
+
+```typescript
+interface CredentialRequest {
+  studentId:   string;            // doc ID of requesting student
+  studentName: string;
+  email:       string;
+  type:        'name' | 'student_id' | 'dept_program';
+  status:      'pending' | 'pending_verification' | 'approved' | 'partial' | 'revoked';
+  current:     Record<string, string>;   // snapshot of fields before change
+  requested:   Record<string, string>;   // what the student wants changed
+  reason:      string;
+  requiresVerification?: boolean;        // true for ID and dept_program changes
+  verified?:   boolean;                  // toggled by admin after physical check
+  adminNote?:  string;                   // revocation reason
+  approvedFields?: Record<string, string>; // only for partial name approvals
+  createdAt:   string;
+  updatedAt:   string;
+}
+```
+
+**Security:** Firestore rule — students can create; NEU staff can read/update; owner can delete.
+
+**Student ID change flow:** Because user doc IDs equal student IDs, an ID change copies the full user document to the new doc ID and deletes the old doc atomically.
 
 ### `/audit_logs/{logId}`
 
@@ -585,30 +611,46 @@ Accordion, Alert, AlertDialog, Avatar, Badge, Button, Calendar, Card, Carousel, 
 
 ## AI Integration
 
-**Files:** `src/ai/genkit.ts`, `src/ai/flows/ai-powered-visit-summary-flow.ts`
+**Files:** `src/ai/genkit.ts`, `src/ai/flows/ai-powered-visit-summary-flow.ts`, `src/app/api/ai-summary/route.ts`
 
 The AI Visit Summary feature uses **Firebase Genkit** with the **Google Gemini** model family to generate a scholarly analysis of library visit trends.
 
+### API Key Security
+
+The Gemini API key is a **server-side-only secret**. It must **never** be hardcoded in source files or prefixed with `NEXT_PUBLIC_`.
+
+```bash
+# .env.local  (git-ignored — never committed)
+GEMINI_API_KEY=your_key_here
+```
+
+Set this variable in your deployment platform (Vercel → Settings → Environment Variables, or Firebase App Hosting → env config). The `/api/ai-summary` route reads `process.env.GEMINI_API_KEY` at runtime; the browser never sees it.
+
 ### How It Works
 
-1. Admin selects a date range and triggers the AI summary in `ReportModule.tsx`
-2. The app calls the `/api/ai-summary` route, passing up to 50 visit records
-3. Genkit sends a structured prompt to Gemini:
-   - Peak usage periods
-   - Most common visit purposes
-   - Most active departments
-   - Actionable insights for library management
-4. The response is streamed back and displayed in the report
+1. Admin selects a date range and clicks **AI Insights** in `ReportModule.tsx`
+2. The app calls `/api/ai-summary` (a Next.js server-side API route), passing up to 50 visit records
+3. The route checks `process.env.GEMINI_API_KEY` — if unset, returns 503 immediately
+4. Genkit sends a structured prompt to Gemini covering peak hours, purposes, departments, and actionable insights
+5. The response is displayed in the report card
 
 ### Model Fallback Chain
-
-The flow attempts models in priority order with exponential backoff:
 
 ```
 googleai/gemini-2.0-flash-exp  →  googleai/gemini-1.5-flash  →  googleai/gemini-1.5-pro
 ```
 
-If all AI models fail (e.g. quota exceeded), the system automatically falls back to a **statistical summary** computed client-side from the raw log data.
+### Statistical Fallback (always available)
+
+If all AI models fail (quota exceeded, key not set, network error, or 503), the system automatically computes a **client-side statistical summary** from raw log data — no API call needed. The summary includes:
+
+- Peak activity hour with visit count
+- Most common visit purpose (out of N unique purposes)
+- Most active department
+- Unique student count
+- Average completed session duration
+
+This means the AI Insights button **always produces useful output** regardless of API availability.
 
 ---
 
@@ -736,6 +778,14 @@ const nextConfig: NextConfig = {
 
 ## Environment Variables
 
+> ⚠️ **Security**: Never hardcode API keys in source files. All secrets must be in `.env.local` (local dev) or your deployment platform's environment settings (production). The `.env.local` file is git-ignored and never committed.
+
+Copy `.env.local.example` to `.env.local` and fill in your values:
+
+```bash
+cp .env.local.example .env.local
+```
+
 Set these in your GitHub repository's **Secrets** (for CI) or in a local `.env.local` file:
 
 ```env
@@ -841,7 +891,31 @@ firebase deploy --only firestore:rules
 - ✅ Live Clock component
 - ✅ GitHub Actions CI/CD to GitHub Pages
 
-### New in Latest Update
+### Latest Refinements (UI Cleanup & Logic)
+- ✅ **Landing Page 2+2 Layout** — Two primary kiosk-style cards (Kiosk, Admin) + two compact action buttons (Register, Request Credential) in a clean 2-column row
+- ✅ **Register button** — Checks NEU Mail; if already registered shows a kiosk-style popup with 5s countdown then redirects to kiosk; if new user proceeds to registration form
+- ✅ **Removed duplicate Live Presence** — `traffic` tab removed; single `presence` tab (Live Presence / CurrentVisitors) in both SuperAdmin and Staff dashboards
+- ✅ **Verify button removed** from Live Presence — flow is now direct Tap → Reason → Welcome Message; no student prompts
+- ✅ **Admin Welcome Screen** — changed from solid navy "blue screen" to neutral `backdrop-filter: blur(16px)` with white card and gold avatar; integrates naturally with the dashboard behind it
+- ✅ **Student ID auto-dash in Request Credential** — `CredentialRequestModal` Student ID field now uses strict clean-then-format logic: strips all non-digits, rebuilds `XX-XXXXX-XXX` from scratch, preventing `24-128644-444` type errors
+- ✅ **Firestore auth race fix** — `/users` read rule relaxed to `isSignedIn()` (was `isAuthenticatedUser()`); `getIdToken(true)` forced before every `resolveUserByEmail` call; retry-with-backoff added for permission errors
+- ✅ **Admin whitelist routing** — owner email path now sets `resolvedUser` with `super_admin` role before routing to AdminDashboard
+
+### Previous Updates
+- ✅ **Audit Log Full View** — expand icon on each row opens a modal with the complete untruncated detail, actor info, target, and ISO timestamp
+- ✅ **AI statistical fallback** — clicking AI Insights now always produces output; if the API is unavailable, a full statistical summary (peak hour, top purpose, top dept, avg duration, unique students) is computed client-side
+- ✅ **API key security** — removed hardcoded Gemini API key from all source files; key is now read from `GEMINI_API_KEY` env var (server-side only, never exposed to browser); added `.env.local.example` template
+
+### Previous Fixes
+- ✅ **Credential requests closed after action** — Approve/Revoke buttons hidden once a request is approved, partially approved, or revoked; replaced with a read-only status indicator
+- ✅ **Student ID change now works** — Copies user doc to new ID, deletes old doc; student is notified with their new ID
+- ✅ **Admin/Student switch persists on refresh** — Admin state saved to `sessionStorage` so refresh no longer loses the switcher button
+- ✅ **Red notification badge on Requests nav** — Live count of pending/pending-verification requests shown in sidebar and mobile drawer
+- ✅ **Smooth themed scrollbars** — All overflow areas use `scrollbarWidth: thin` with navy-toned track colors matching the UI
+- ✅ **Occupancy verification** — 3-hour auto-dialog on student portal; manual "Verify" button per active session in Live Presence
+- ✅ **Credential Request system** — Full workflow: student submits → admin reviews with granular name-field approval → registry auto-updates → student notified
+
+### Previous Updates
 - ✅ Bulk Notify All Pending with per-student date substitution
 - ✅ Visit Purposes management tab (Firestore-backed, live kiosk update)
 - ✅ CSV registry export (full or filtered)
@@ -855,7 +929,7 @@ firebase deploy --only firestore:rules
 
 ## License
 
-© 2026 New Era University Library. All Rights Reserved.
+© 2025 New Era University Library. All Rights Reserved.
 This system was developed for institutional use at New Era University, No. 9 Central Avenue, Quezon City, Philippines.
 
 ---
