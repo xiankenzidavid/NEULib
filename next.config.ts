@@ -19,6 +19,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+
+  // 👇 This is the key change
+  output: 'export',
 };
 
 export default nextConfig;
