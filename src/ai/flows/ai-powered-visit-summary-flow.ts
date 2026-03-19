@@ -227,7 +227,7 @@ Based on ${data.length} visits analyzed from ${input.startDate} to ${input.endDa
 
 ⚠️ Note: This is a statistical summary because the AI service is currently unavailable due to quota limitations. To enable AI-powered insights:
 1. Visit https://makersuite.google.com/app/apikey
-2. Check your quota for API key: AIzaSyBPTi_LH2X2pbVyzBfKhWBH-N5nNKEwADo
+2. Check your quota for API key: 
 3. Consider enabling billing or requesting a quota increase`,
       };
     } catch (fallbackError) {
@@ -240,9 +240,9 @@ Based on ${data.length} visits analyzed from ${input.startDate} to ${input.endDa
 
 To resolve this issue:
 1. Go to https://makersuite.google.com/app/apikey
-2. Check the quota for API key: AIzaSyBPTi_LH2X2pbVyzBfKhWBH-N5nNKEwADo
+2. Check the quota for API key: 
 3. Enable billing or request a quota increase
-4. You can also try using the other API key: AIzaSyAcEMRxw_glDeokV4spWDOY2062RKw5p1o
+4. You can also try using the other API key: 
 
 Please review the raw trends in the charts or export to PDF for manual analysis.`,
     };

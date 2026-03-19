@@ -457,7 +457,7 @@ export default function Home() {
               (e.currentTarget as HTMLButtonElement).style.boxShadow = 'none';
             }}>
             <FileEdit size={15} />
-            Request Credential
+            Request Credential Change
           </button>
         </div>
       </div>
