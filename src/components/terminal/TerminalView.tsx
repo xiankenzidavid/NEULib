@@ -50,6 +50,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
   const [lastAction,        setLastAction]        = useState<'checkin' | 'checkout'>('checkin');
   const [showNotRegistered, setShowNotRegistered] = useState(false);
   const [blockedStudent,    setBlockedStudent]    = useState<{ name: string } | null>(null);
+  const [sessionDuration,   setSessionDuration]   = useState<{ hours: number; minutes: number } | null>(null);
 
   // Dept/program for visitors
   const [visitorDeptId,   setVisitorDeptId]   = useState('');
@@ -120,7 +121,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
     const wasAdmin = identifiedStudent?.role === 'admin' || identifiedStudent?.role === 'super_admin';
     setStep('auth'); setRfidInput(''); setIdentifiedStudent(null);
     setPurpose(''); setLastAction('checkin'); setIsVisitor(false);
-    setVisitorDeptId(''); setVisitorProgram('');
+    setVisitorDeptId(''); setVisitorProgram(''); setSessionDuration(null);
     if (wasAdmin && onAdminReturn) onAdminReturn();
   };
 
@@ -140,8 +141,15 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
     if (!snap.empty) {
       const log = snap.docs[0].data();
       if (!log.checkOutTimestamp && isToday(parseISO(log.checkInTimestamp))) {
+        const checkOutNow = new Date();
         updateDocumentNonBlocking(doc(db, 'library_logs', snap.docs[0].id),
-          { checkOutTimestamp: new Date().toISOString() });
+          { checkOutTimestamp: checkOutNow.toISOString() });
+
+        // Compute how long the student was inside
+        const checkInTime  = parseISO(log.checkInTimestamp);
+        const totalMinutes = Math.max(0, Math.floor((checkOutNow.getTime() - checkInTime.getTime()) / 60000));
+        setSessionDuration({ hours: Math.floor(totalMinutes / 60), minutes: totalMinutes % 60 });
+
         setIdentifiedStudent(student);
         setLastAction('checkout');
         setStep('success');
@@ -476,15 +484,6 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
                     ))}
                   </SelectContent>
                 </Select>
-
-                {/* Visual confirmation of selection */}
-                {purpose && (
-                  <div className="flex items-center gap-2 p-3 rounded-xl"
-                    style={{ background: `${navy}08`, border: `1px solid ${navy}20` }}>
-                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: navy }} />
-                    <span className="text-sm font-bold" style={{ color: navy }}>{purpose}</span>
-                  </div>
-                )}
               </div>
 
               <div className="flex w-full gap-3">
@@ -504,15 +503,28 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
 
         {/* ── SUCCESS ── */}
         {step === 'success' && identifiedStudent && (() => {
+          const firstName   = identifiedStudent.firstName;
           const fullName    = `${identifiedStudent.firstName} ${identifiedStudent.lastName}`.trim();
           const collegeName = identifiedStudent.deptID === 'STAFF'
             ? 'Library Staff'
             : (DEPARTMENTS[identifiedStudent.deptID ?? ''] || identifiedStudent.deptID || '');
-          const prog      = identifiedStudent.program || '';
-          const isCheckIn = lastAction === 'checkin';
+          const prog        = identifiedStudent.program || '';
+          const isCheckIn   = lastAction === 'checkin';
+
+          // Build duration string for tap-out
+          const durStr = (() => {
+            if (!sessionDuration) return null;
+            const { hours, minutes } = sessionDuration;
+            if (hours === 0 && minutes === 0) return 'less than a minute';
+            if (hours === 0) return `${minutes} min${minutes !== 1 ? 's' : ''}`;
+            if (minutes === 0) return `${hours} hr${hours !== 1 ? 's' : ''}`;
+            return `${hours} hr${hours !== 1 ? 's' : ''} ${minutes} min${minutes !== 1 ? 's' : ''}`;
+          })();
+
           return (
             <div className="rounded-[2rem] overflow-hidden shadow-2xl animate-in zoom-in duration-500"
               style={{ background: 'linear-gradient(160deg,hsl(225,70%,38%) 0%,hsl(221,72%,22%) 100%)' }}>
+
               <div className="px-8 pt-10 pb-4 text-center space-y-3">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto"
                   style={{ background: 'rgba(255,255,255,0.15)' }}>
@@ -523,9 +535,10 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
                 <p className="text-white/50 text-xs font-bold uppercase tracking-widest pt-1">
                   {isCheckIn ? 'Check-In Logged' : 'Check-Out Logged'}
                 </p>
-                <h2 className="text-3xl font-extrabold text-white leading-tight" style={{ fontFamily: "'Playfair Display',serif" }}>
-                  {isCheckIn ? 'Welcome to NEU Library,' : 'Thank you,'}
-                  <br />{fullName}!
+                <h2 className="text-3xl font-extrabold text-white leading-tight"
+                  style={{ fontFamily: "'Playfair Display',serif" }}>
+                  {isCheckIn ? 'Welcome to NEU Library,' : 'Thank You,'}
+                  <br />{firstName}!
                 </h2>
                 {collegeName && (
                   <p className="text-white/45 text-xs font-bold uppercase tracking-widest">
@@ -533,19 +546,48 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
                   </p>
                 )}
               </div>
+
               <div className="mx-6 border-t border-white/15 mt-4" />
+
               <div className="px-8 py-6 text-center space-y-5">
-                <p className="text-white/80 text-base font-medium leading-relaxed">
-                  {isCheckIn
-                    ? `Thank you for logging. You may now enter, ${identifiedStudent.firstName}.`
-                    : `Your session has been recorded. Have a great day!`}
-                </p>
-                <div className="flex items-center justify-center gap-3 text-white/60 text-sm font-semibold">
-                  <span className="text-white font-extrabold text-xl" style={{ fontFamily: "'DM Mono',monospace" }}>{countdown}</span>
+                {isCheckIn ? (
+                  <p className="text-white/80 text-base font-medium leading-relaxed">
+                    Thank you for logging. You may now enter, <strong className="text-white">{firstName}</strong>.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Duration pill */}
+                    {durStr && (
+                      <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl"
+                        style={{ background: 'rgba(255,255,255,0.14)' }}>
+                        <LogOut size={15} className="text-white/70" />
+                        <span className="text-white font-bold text-base" style={{ fontFamily: "'DM Mono',monospace" }}>
+                          {durStr}
+                        </span>
+                        <span className="text-white/60 text-sm font-medium">inside</span>
+                      </div>
+                    )}
+                    {/* Farewell message */}
+                    <p className="text-white/85 text-base font-medium leading-relaxed">
+                      Thank You <strong className="text-white">{fullName}</strong> for visiting NEU Library.{' '}
+                      {durStr && (
+                        <>You have been <strong className="text-white">{durStr}</strong> inside.<br /></>
+                      )}
+                      Your session has been recorded. Have a great day!
+                    </p>
+                  </div>
+                )}
+
+                {/* Countdown */}
+                <div className="flex items-center justify-center gap-2 text-white/50 text-sm font-semibold">
+                  <span>Returning in</span>
+                  <span className="text-white font-extrabold text-xl w-7 text-center"
+                    style={{ fontFamily: "'DM Mono',monospace" }}>{countdown}</span>
                 </div>
+
                 <button onClick={handleReset}
-                  className="px-8 py-2 rounded-full font-bold text-sm text-white/60 hover:text-white border border-white/20 hover:border-white/50 transition-all">
-                  Skip
+                  className="px-8 py-2 rounded-full font-bold text-sm text-white/60 hover:text-white border border-white/20 hover:border-white/50 transition-all active:scale-95">
+                  Done
                 </button>
               </div>
             </div>

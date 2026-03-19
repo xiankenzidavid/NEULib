@@ -2,15 +2,13 @@
 
 import { useState } from 'react';
 import { LiveClock } from '@/components/LiveClock';
-import { StatsCards } from './StatsCards';
+import { OverviewDashboard } from './OverviewDashboard';
 import { UserManagement } from './UserManagement';
 import { TemporaryVisitorManagement } from './TemporaryVisitorManagement';
 import { LiveFeed } from './LiveFeed';
 import { ReportModule } from './ReportModule';
 import { AdminAccessManagement } from './AdminAccessManagement';
 import { DepartmentManagement } from './DepartmentManagement';
-import { VisitorChart } from './VisitorChart';
-import { AnalyticsBreakdown } from './AnalyticsBreakdown';
 import { CurrentVisitors } from './CurrentVisitors';
 import { AuditLogTab } from './AuditLogTab';
 import { LogHistory } from './LogHistory';
@@ -134,11 +132,7 @@ export default function UnifiedAdminDashboard({
       case 'overview':
         return (
           <div className="space-y-4 sm:space-y-6">
-            <StatsCards />
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
-              <div className="xl:col-span-1"><VisitorChart /></div>
-              <div className="xl:col-span-2"><AnalyticsBreakdown /></div>
-            </div>
+            <OverviewDashboard />
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 items-start">
               <div className="lg:col-span-2"><LiveFeed /></div>
               <div className="lg:col-span-1 flex flex-col gap-4">

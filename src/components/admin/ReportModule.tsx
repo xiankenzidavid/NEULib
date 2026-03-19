@@ -253,8 +253,6 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
       `• Total Departments Active: ${deptCount}`,
       `• Unique Students: ${uniqueStudents}`,
       `• Average Session Duration: ${avgDurStr} (${completed.length} completed session${completed.length !== 1 ? 's' : ''})`,
-      ``,
-      `⚠️ Note: This is a statistical summary because the AI service is currently unavailable. To enable AI-powered insights, set the GEMINI_API_KEY environment variable and redeploy.`,
     ].join('\n');
   };
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import { CheckCircle2, X } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { CheckCircle2 } from 'lucide-react';
 
 interface SuccessCardProps {
   title: string;
@@ -9,38 +9,56 @@ interface SuccessCardProps {
   /** Auto-close delay in ms. Default: 5000 */
   duration?: number;
   onClose: () => void;
-  /** Optional extra content rendered below the description */
   children?: React.ReactNode;
-  /** Icon override — defaults to CheckCircle2 */
   icon?: React.ReactNode;
-  /** Color theme — default is emerald green */
   color?: 'green' | 'navy' | 'amber';
 }
 
 const COLORS = {
-  green: { bg: 'rgba(5,150,105,0.1)', icon: '#059669', bar: '#059669' },
-  navy:  { bg: 'rgba(10,26,77,0.08)', icon: 'hsl(221,72%,22%)', bar: 'hsl(221,72%,22%)' },
-  amber: { bg: 'rgba(251,191,36,0.12)', icon: 'hsl(43,85%,42%)', bar: 'hsl(43,85%,50%)' },
+  green: { bg: 'rgba(5,150,105,0.1)',   icon: '#059669',          bar: '#059669'          },
+  navy:  { bg: 'rgba(10,26,77,0.08)',   icon: 'hsl(221,72%,22%)', bar: 'hsl(221,72%,22%)' },
+  amber: { bg: 'rgba(251,191,36,0.12)', icon: 'hsl(43,85%,42%)',  bar: 'hsl(43,85%,50%)'  },
 };
 
 export function SuccessCard({
   title, description, duration = 5000, onClose, children, icon, color = 'green',
 }: SuccessCardProps) {
-  const [progress, setProgress] = useState(100);
+  const [progress,  setProgress]  = useState(100);
+  const [remaining, setRemaining] = useState(Math.ceil(duration / 1000));
   const c = COLORS[color];
 
+  // Store onClose in a ref so the timer effect never needs it as a dependency.
+  // Without this, every new inline arrow function passed as onClose would restart
+  // the timer — and calling onClose inside setProgress (a state updater) triggers
+  // React's "cannot update component while rendering" error.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
   useEffect(() => {
-    const interval = 50; // update every 50ms
-    const step = (interval / duration) * 100;
+    const interval = 50;
+    const step     = (interval / duration) * 100;
+    let   elapsed  = 0;
+
     const timer = setInterval(() => {
-      setProgress(p => {
-        const next = p - step;
-        if (next <= 0) { clearInterval(timer); onClose(); return 0; }
+      elapsed += interval;
+      setRemaining(Math.max(0, Math.ceil((duration - elapsed) / 1000)));
+      setProgress(prev => {
+        const next = prev - step;
+        if (next <= 0) {
+          clearInterval(timer);
+          // Defer via setTimeout so onClose always fires outside any React
+          // render or state-update cycle — fixes "setState during render" errors.
+          setTimeout(() => onCloseRef.current(), 0);
+          return 0;
+        }
         return next;
       });
     }, interval);
+
     return () => clearInterval(timer);
-  }, [duration, onClose]);
+  // Only duration matters — onClose is accessed via ref, so it's safe to omit
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duration]);
 
   return (
     <div
@@ -50,10 +68,9 @@ export function SuccessCard({
         className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300"
         style={{ fontFamily: "'DM Sans',sans-serif" }}>
 
-        {/* Progress bar — shrinks from full to 0 over `duration` ms */}
+        {/* Shrinking progress bar */}
         <div className="h-1 w-full bg-slate-100">
-          <div
-            className="h-1 transition-none"
+          <div className="h-1 transition-none"
             style={{ width: `${progress}%`, background: c.bar }} />
         </div>
 
@@ -67,7 +84,8 @@ export function SuccessCard({
 
           {/* Text */}
           <div className="space-y-1.5">
-            <h3 className="text-xl font-bold text-slate-900" style={{ fontFamily: "'Playfair Display',serif" }}>
+            <h3 className="text-xl font-bold text-slate-900"
+              style={{ fontFamily: "'Playfair Display',serif" }}>
               {title}
             </h3>
             {description && (
@@ -77,18 +95,18 @@ export function SuccessCard({
 
           {children}
 
-          {/* Dismiss button */}
+          {/* Manual dismiss */}
           <button
-            onClick={onClose}
+            onClick={() => onCloseRef.current()}
             className="w-full h-11 rounded-2xl font-bold text-sm text-white transition-all active:scale-95"
-            style={{ background: `linear-gradient(135deg,hsl(221,72%,22%),hsl(221,60%,32%))` }}>
+            style={{ background: 'linear-gradient(135deg,hsl(221,72%,22%),hsl(221,60%,32%))' }}>
             OK
           </button>
 
-          <p className="text-slate-300 text-xs">Closes automatically in {Math.ceil((progress / 100) * (duration / 1000))}s</p>
+          <p className="text-slate-300 text-xs">Closes in {remaining}s</p>
         </div>
       </div>
-      <style>{`@keyframes fadeIn { from{opacity:0} to{opacity:1} }`}</style>
+      <style>{`@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }`}</style>
     </div>
   );
 }

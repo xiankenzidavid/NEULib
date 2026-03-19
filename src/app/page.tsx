@@ -15,7 +15,7 @@
  *   - No manual Register button on the landing page
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import TerminalView from '@/components/terminal/TerminalView';
 import AdminDashboard from '@/components/admin/AdminDashboard';
 import RegistrationPage from '@/components/student/RegistrationPage';
@@ -49,6 +49,12 @@ export default function Home() {
   const [isCredAuthOpen, setIsCredAuthOpen] = useState(false);
   const [credAuthUser,   setCredAuthUser]   = useState<UserRecord | null>(null);
   const [showCredModal,  setShowCredModal]  = useState(false);
+
+  // Stable callback — prevents SuccessCard useEffect re-running on every render
+  const handleCredModalClose = useCallback(() => {
+    setShowCredModal(false);
+    setCredAuthUser(null);
+  }, []);
 
   // "Not registered via ID" popup — shown when kiosk can't find a student ID
   // and they haven't used a @neu.edu.ph email
@@ -510,7 +516,7 @@ export default function Home() {
             return (
               <CredentialRequestModal
                 profile={credAuthUser}
-                onClose={() => { setShowCredModal(false); setCredAuthUser(null); }}
+                onClose={handleCredModalClose}
               />
             );
           })()}
