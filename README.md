@@ -11,7 +11,7 @@
 
 > **Institutional Presence & Visitor Management System for the New Era University Library**
 
-**Live Site → [https://shawndavidsdomingo.github.io/NEULib/](https://shawndavidsdomingo.github.io/NEULib/)**
+**Live Site → [https://shawndavidsdomingo-neu-library.vercel.app/](https://shawndavidsdomingo-neu-library.vercel.app/)**
 
 ---
 
@@ -929,7 +929,7 @@ firebase deploy --only firestore:rules
 
 ## License
 
-© 2025 New Era University Library. All Rights Reserved.
+© 2026 New Era University Library. All Rights Reserved.
 This system was developed for institutional use at New Era University, No. 9 Central Avenue, Quezon City, Philippines.
 
 ---
