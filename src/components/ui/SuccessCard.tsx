@@ -27,12 +27,10 @@ export function SuccessCard({
   const [remaining, setRemaining] = useState(Math.ceil(duration / 1000));
   const c = COLORS[color];
 
-  // Store onClose in a ref so the timer effect never needs it as a dependency.
-  // Without this, every new inline arrow function passed as onClose would restart
-  // the timer — and calling onClose inside setProgress (a state updater) triggers
-  // React's "cannot update component while rendering" error.
+  // Keep ref always current — assigned during render (not in an effect)
+  // so it's always up-to-date when the timer fires, without any re-render side-effects.
   const onCloseRef = useRef(onClose);
-  useEffect(() => { onCloseRef.current = onClose; });
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const interval = 50;

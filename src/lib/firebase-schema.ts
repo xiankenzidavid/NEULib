@@ -4,7 +4,7 @@
  * MIGRATION: /students + /admins + /temporary_visitors → /users/{id}
  *
  * /users/{id}
- *   id       = doc ID (studentId e.g. "24-12864-481", adminId, or "TEMP-...")
+ *   id       = doc ID (studentId e.g. "XX-YYYYY-ZZZ", adminId, or "TEMP-...")
  *   role     = 'student' | 'admin' | 'super_admin' | 'visitor'
  *   status   = 'active' | 'pending' | 'blocked'
  */

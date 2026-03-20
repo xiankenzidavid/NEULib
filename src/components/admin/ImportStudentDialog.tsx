@@ -19,7 +19,7 @@ interface ImportStudentDialogProps {
  * CSV FORMAT (must match export):
  * id,firstName,middleName,lastName,email,deptID,program
  *
- * - id: student ID in format YY-XXXXX-ZZZ (e.g. 24-12864-481)
+ * - id: student ID in format YY-XXXXX-ZZZ
  * - middleName: optional, leave blank if none
  * - program: program code (e.g. BSIT, BSCS)
  */

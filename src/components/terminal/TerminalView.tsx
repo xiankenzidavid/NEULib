@@ -31,9 +31,10 @@ interface TerminalViewProps {
 }
 
 export default function TerminalView({ onComplete, onAdminReturn, onRegister, preloadedUser }: TerminalViewProps) {
-  // If a newly registered user is passed in, start at purpose step immediately
+  // If a newly registered user is passed in, check if they have deptID before determining step
+  const needsDeptStep = preloadedUser && (!preloadedUser.deptID || preloadedUser.deptID === '');
   const [step,              setStep]              = useState<'auth' | 'dept' | 'purpose' | 'success'>(
-    preloadedUser ? 'purpose' : 'auth'
+    preloadedUser ? (needsDeptStep ? 'dept' : 'purpose') : 'auth'
   );
   const [rfidInput,         setRfidInput]         = useState('');
   const [identifiedStudent, setIdentifiedStudent] = useState<StudentRecord | null>(
@@ -43,7 +44,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
       isBlocked: (preloadedUser.status as string) === 'blocked',
     } as StudentRecord : null
   );
-  const [isVisitor,         setIsVisitor]         = useState(false);
+  const [isVisitor,         setIsVisitor]         = useState(needsDeptStep);
   const [purpose,           setPurpose]           = useState('');
   const [isSearching,       setIsSearching]       = useState(false);
   const [countdown,         setCountdown]         = useState(5);
@@ -62,7 +63,6 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleRfidChange = (raw: string) => setRfidInput(formatStudentId(raw));
   const { toast } = useToast();
   const db   = useFirestore();
   const auth = useAuth();
@@ -87,7 +87,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
       .catch(() => setLivePurposes(FALLBACK_PURPOSES));
   }, [db]);
 
-  // Load departments (keeping Version 1's clean approach)
+  // Load departments
   useEffect(() => {
     getDocs(collection(db, 'departments')).then(snap =>
       setAllDepts(snap.docs.map(d => d.data() as { deptID: string; departmentName: string })
@@ -95,7 +95,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
     );
   }, [db]);
 
-  // Load programs when dept changes (keeping Version 1's sorting)
+  // Load programs when dept changes
   useEffect(() => {
     if (!visitorDeptId) { setDeptPrograms([]); return; }
     setIsLoadingProgs(true);
@@ -206,6 +206,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
         return;
       }
 
+      // Not found — show not registered info
       // Not found — show popup card
       setShowNotRegistered(true);
     } catch {
@@ -257,7 +258,6 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
   };
 
   const handleGoogleLogin = async () => {
-    setIsSearching(true);
     try {
       const result = await signInWithPopup(auth, new GoogleAuthProvider());
       const email  = result.user.email;
@@ -290,6 +290,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
       }
 
       // ── AUTO-REDIRECT: NEU email not in database → registration ──────────
+      // No manual register button needed — this handles it automatically
       if (email?.endsWith('@neu.edu.ph') && onRegister) {
         onRegister(email);
         return;
@@ -312,6 +313,12 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
 
   const handleCheckIn = () => {
     if (!purpose || !identifiedStudent) return;
+    if (!identifiedStudent.deptID) {
+      toast({ title: 'Missing Information', description: 'Department information is required.', variant: 'destructive' });
+      setStep('dept');
+      setIsVisitor(true);
+      return;
+    }
     addDocumentNonBlocking(collection(db, 'library_logs'), {
       studentId:        identifiedStudent.studentId,
       deptID:           identifiedStudent.deptID,
@@ -332,16 +339,20 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
 
         {/* ── AUTH ── */}
         {step === 'auth' && (
-          <div className="rounded-[2rem] overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-400">
-            {/* Header */}
+          <div className="rounded-[2rem] overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-700"
+            style={{ transition: 'transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1.01)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 32px 64px rgba(0,0,0,0.35)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)'; (e.currentTarget as HTMLDivElement).style.boxShadow = ''; }}>
+            {/* Blue gradient header — no glass */}
             <div className="px-8 pt-8 pb-8 text-center relative"
               style={{ background: 'linear-gradient(160deg,hsl(225,70%,42%) 0%,hsl(221,72%,28%) 60%,hsl(221,72%,22%) 100%)' }}>
               <button onClick={onComplete}
                 className="flex items-center gap-1.5 text-white/50 hover:text-white/80 font-bold text-[10px] uppercase tracking-widest mb-5 transition-all">
                 <ArrowLeft size={13} /> Main Portal
               </button>
+              {/* Solid icon — no backdrop-filter */}
               <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-                style={{ background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(8px)' }}>
+                style={{ background: 'rgba(255,255,255,0.20)' }}>
                 <Radio size={32} className="text-white animate-pulse" />
               </div>
               <h1 className="text-4xl font-extrabold text-white tracking-tight" style={{ fontFamily: "'Playfair Display',serif" }}>
@@ -351,8 +362,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
                 NEU · Tap to Enter or Exit
               </p>
             </div>
-
-            {/* Body */}
+            {/* White body — solid */}
             <div className="bg-white px-8 py-7 space-y-5">
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
@@ -364,46 +374,48 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
                 <div className="relative">
                   <Scan className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                   <Input ref={inputRef} placeholder="XX-YYYYY-ZZZ"
-                    value={rfidInput} onChange={e => handleRfidChange(e.target.value)}
-                    className="h-14 text-lg font-mono text-center font-bold rounded-2xl border-2 border-slate-200 bg-slate-50/80 focus:bg-white focus:border-primary/40 pl-10 tracking-widest"
+                    value={rfidInput}
+                    onChange={e => {
+                      // Strip non-digits from whatever the browser gives us,
+                      // then rebuild the formatted string from scratch every time.
+                      // This prevents double-digit bugs from composition events.
+                      const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      let out = digits;
+                      if (digits.length > 2) out = digits.slice(0,2) + '-' + digits.slice(2);
+                      if (digits.length > 7) out = digits.slice(0,2) + '-' + digits.slice(2,7) + '-' + digits.slice(7);
+                      setRfidInput(out);
+                    }}
+                    className="h-14 text-lg font-mono text-center font-bold rounded-2xl border-2 border-slate-200 bg-slate-50 focus:bg-white focus:border-primary/40 pl-10 tracking-widest"
                     onKeyDown={e => e.key === 'Enter' && handleIdentify(rfidInput)}
-                    inputMode="text" />
+                    inputMode="numeric" autoComplete="off" autoCorrect="off" spellCheck={false} />
                 </div>
               </div>
-
               <Button onClick={() => handleIdentify(rfidInput)}
                 className="w-full h-13 py-3.5 text-base font-bold rounded-2xl shadow-lg transition-all"
-                style={{ background: 'linear-gradient(135deg,hsl(225,70%,42%),hsl(221,72%,28%))' }}
+                style={{ background: 'linear-gradient(135deg,hsl(43,85%,50%),hsl(38,90%,42%))' }}
                 disabled={isSearching || !rfidInput.trim()}>
                 {isSearching ? <Loader2 className="animate-spin mr-2" size={18} /> : null}
                 {isSearching ? 'Searching…' : 'Verify Identity'}
               </Button>
-
               <div className="relative py-1">
                 <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-100" /></div>
                 <div className="relative flex justify-center text-xs font-bold uppercase tracking-widest">
                   <span className="bg-white px-4 text-slate-300">Cloud Enrollment</span>
                 </div>
               </div>
-
-              {/* Google login — auto-redirects unregistered NEU emails to registration */}
               <Button variant="outline" onClick={handleGoogleLogin} disabled={isSearching}
-                className="w-full h-12 text-sm font-semibold rounded-2xl border border-slate-200 hover:bg-slate-50 transition-all"
-                style={{ color: '#1e293b' }}>
+                className="w-full h-12 text-sm font-semibold rounded-2xl border-2 hover:bg-slate-50 transition-all"
+                style={{ borderColor: 'hsl(221,72%,22%)', color: 'hsl(221,72%,22%)' }}>
                 <div className="flex items-center gap-3">
                   <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-4 h-4" />
                   Institutional Login
                 </div>
               </Button>
-
-              <p className="text-center text-xs text-slate-400 font-medium">
-                First time? Log in with your <strong>@neu.edu.ph</strong> email — you'll be redirected to registration automatically.
-              </p>
             </div>
           </div>
         )}
 
-        {/* ── DEPT/PROGRAM (visitors only) — keeping Version 1's clean design ── */}
+        {/* ── DEPT/PROGRAM (visitors only) ── */}
         {step === 'dept' && identifiedStudent && (
           <Card className="rounded-[2.5rem] shadow-2xl p-10 space-y-6 animate-in slide-in-from-bottom-4 duration-500"
             style={{ background: '#ffffff', border: '1px solid #e2e8f0' }}>
@@ -479,7 +491,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
           </Card>
         )}
 
-        {/* ── PURPOSE — keeping Version 1's clean design ── */}
+        {/* ── PURPOSE — now a dropdown ── */}
         {step === 'purpose' && identifiedStudent && (
           <div className="rounded-[2rem] overflow-hidden shadow-2xl animate-in slide-in-from-bottom-4 duration-400"
             style={{ background: 'linear-gradient(160deg,hsl(225,70%,42%) 0%,hsl(221,72%,22%) 100%)' }}>
@@ -511,6 +523,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
                   Select Purpose of Visit
                 </p>
 
+                {/* FIX: Dropdown instead of grid buttons for data consistency */}
                 <Select value={purpose} onValueChange={setPurpose}>
                   <SelectTrigger className="h-14 rounded-2xl border-2 bg-slate-50 font-semibold text-base"
                     style={{ borderColor: purpose ? navy : '#e2e8f0' }}>
@@ -525,6 +538,15 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
                     ))}
                   </SelectContent>
                 </Select>
+
+                {/* Visual confirmation of selection */}
+                {purpose && (
+                  <div className="flex items-center gap-2 p-3 rounded-xl"
+                    style={{ background: `${navy}08`, border: `1px solid ${navy}20` }}>
+                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: navy }} />
+                    <span className="text-sm font-bold" style={{ color: navy }}>{purpose}</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex w-full gap-3">
@@ -634,7 +656,6 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
             </div>
           );
         })()}
-
         {/* ── BLOCKED STUDENT POPUP ── */}
         {blockedStudent && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -665,7 +686,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
           </div>
         )}
 
-        {/* ── NOT REGISTERED POPUP (using Version 2's exact design) ── */}
+        {/* ── NOT REGISTERED POPUP ── */}
         {showNotRegistered && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
             style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', animation: 'fadeIn 0.2s ease-out' }}>

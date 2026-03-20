@@ -12,8 +12,8 @@ import { UserRecord, ProgramRecord } from '@/lib/firebase-schema';
 const navy = 'hsl(221,72%,22%)';
 
 interface Props {
-  onSubmitted: (registeredUser?: UserRecord) => void; // passes user back so kiosk can pre-fill
-  onBack: () => void;
+  onSubmitted: (registeredUser: UserRecord) => void;   // called after successful registration → skip to purpose selection
+  onBack: () => void;        // cancel → back to landing
 }
 
 export default function RegistrationPage({ onSubmitted, onBack }: Props) {
@@ -31,32 +31,60 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
   const [error,        setError]        = useState('');
   const [submitting,   setSubmitting]   = useState(false);
   const [done,         setDone]         = useState(false);
-  const [registeredUser, setRegisteredUser] = useState<UserRecord | null>(null);
 
   const [allDepts,     setAllDepts]     = useState<{ deptID: string; departmentName: string }[]>([]);
   const [programs,     setPrograms]     = useState<ProgramRecord[]>([]);
   const [loadingProgs, setLoadingProgs] = useState(false);
 
+  // Load departments
   useEffect(() => {
     getDocs(collection(db, 'departments'))
-      .then(snap => setAllDepts(
-        snap.docs.map(d => d.data() as { deptID: string; departmentName: string })
-          .sort((a, b) => a.departmentName.localeCompare(b.departmentName))
-      ));
+      .then(snap => {
+        const depts = snap.docs.map(d => d.data() as { deptID: string; departmentName: string });
+
+        const sortedDepts = depts.sort((a, b) => {
+          // 1. Define Priority (LIBRARY = 0, Others = 1)
+          const aPrio = a.deptID === 'LIBRARY' ? 0 : 1;
+          const bPrio = b.deptID === 'LIBRARY' ? 0 : 1;
+
+          // 2. Sort by Priority first
+          if (aPrio !== bPrio) return aPrio - bPrio;
+
+          // 3. If priorities are equal, sort alphabetically by deptID
+          return a.deptID.localeCompare(b.deptID);
+        });
+
+        setAllDepts(sortedDepts);
+      });
   }, [db]);
 
+  // Load programs when dept changes
   useEffect(() => {
     if (!deptId) { setPrograms([]); return; }
     setLoadingProgs(true);
     setProgram('');
+
     getDocs(query(collection(db, 'programs'), where('deptID', '==', deptId)))
-      .then(snap => setPrograms(
-        snap.docs.map(d => ({ id: d.id, ...d.data() } as ProgramRecord))
-          .sort((a, b) => a.code.localeCompare(b.code))
-      ))
+      .then(snap => {
+        const progs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ProgramRecord));
+
+        const sortedProgs = progs.sort((a, b) => {
+          // 1. Define Priority (Anything containing "STAFF" = 0, Others = 1)
+          const aIsStaff = a.code.toUpperCase().includes('STAFF') ? 0 : 1;
+          const bIsStaff = b.code.toUpperCase().includes('STAFF') ? 0 : 1;
+
+          if (aIsStaff !== bIsStaff) return aIsStaff - bIsStaff;
+
+          // 2. Sort alphabetically by program name for the rest
+          return a.name.localeCompare(b.name);
+        });
+
+        setPrograms(sortedProgs);
+      })
       .finally(() => setLoadingProgs(false));
   }, [deptId, db]);
 
+  // When user picks "use email name", pre-fill from Google display name
   useEffect(() => {
     if (nameMode === 'email' && user?.displayName) {
       const parts = user.displayName.trim().split(' ');
@@ -69,13 +97,14 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
     }
   }, [nameMode, user?.displayName]);
 
+  // Auto-format student ID: clean-then-format to avoid double-dash bugs
+  // Format: XX-XXXXX-XXX (2-5-3). Always strip all non-digits first.
   const handleIdChange = (raw: string) => {
-    const digits = raw.replace(/\D/g, '');
-    let formatted = digits;
-    if (digits.length > 2)  formatted = digits.slice(0, 2) + '-' + digits.slice(2);
-    if (digits.length > 7)  formatted = formatted.slice(0, 9) + '-' + digits.slice(7);
-    if (digits.length > 10) formatted = formatted.slice(0, 13);
-    setStudentId(formatted);
+    const digits = raw.replace(/[^0-9]/g, '').slice(0, 10); // cap at 10 raw digits
+    let out = digits;
+    if (digits.length > 2) out = digits.slice(0, 2) + '-' + digits.slice(2);
+    if (digits.length > 7) out = digits.slice(0, 2) + '-' + digits.slice(2, 7) + '-' + digits.slice(7);
+    setStudentId(out);
     setError('');
   };
 
@@ -92,6 +121,7 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
 
     setSubmitting(true);
     try {
+      // Check if ID already taken by someone else
       const existing = await getDocs(query(collection(db, 'users'), where('id', '==', studentId.trim()), limit(1)));
       if (!existing.empty && existing.docs[0].data().email !== user.email) {
         setError('This Student ID is already registered to another account.');
@@ -112,10 +142,10 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
       };
 
       await setDoc(doc(db, 'users', studentId.trim()), newData, { merge: false });
-      setRegisteredUser(newData);
       setDone(true);
 
-      // After 3 seconds redirect to kiosk with the registered user's credentials
+      // After a short confirmation display, skip straight to purpose selection
+      // by passing the newly registered user — no need to re-enter dept/program.
       setTimeout(() => {
         onSubmitted(newData);
       }, 3000);
@@ -127,11 +157,10 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
     }
   };
 
-  // ── Success screen — redirects to kiosk purpose step ─────────────────────
-  if (done && registeredUser) {
+  if (done) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6" style={{ fontFamily: "'DM Sans',sans-serif" }}>
-        <div className="bg-white/95 rounded-3xl shadow-2xl p-10 w-full max-w-md text-center space-y-6 animate-in zoom-in duration-500">
+        <div className="bg-white rounded-3xl shadow-xl p-10 w-full max-w-md text-center space-y-6 animate-in zoom-in duration-500" style={{ border: '1px solid #e2e8f0' }}>
           <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto"
             style={{ background: 'rgba(5,150,105,0.1)' }}>
             <CheckCircle2 size={40} className="text-emerald-600" />
@@ -141,19 +170,12 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
               Registration Submitted!
             </h2>
             <p className="text-slate-500 text-sm mt-2 leading-relaxed">
-              Welcome, <strong>{registeredUser.firstName}</strong>! Your account is pending admin verification.
-              Taking you to the kiosk to log your visit now…
+              Welcome! Taking you to check-in now…
             </p>
           </div>
           <div className="flex items-center justify-center gap-2 text-xs text-slate-400 font-medium">
-            <Loader2 size={12} className="animate-spin" /> Redirecting to Kiosk…
+            <Loader2 size={12} className="animate-spin" /> Redirecting…
           </div>
-          {/* Allow manual skip */}
-          <button
-            onClick={() => onSubmitted(registeredUser)}
-            className="text-xs text-slate-400 underline underline-offset-2 hover:text-slate-600 transition-colors">
-            Go now
-          </button>
         </div>
       </div>
     );
@@ -175,18 +197,18 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
           <p className="text-white/60 text-sm font-medium">{user?.email}</p>
         </div>
 
-        <div className="bg-white/97 rounded-2xl shadow-2xl p-6 space-y-5"
-          style={{ backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.9)' }}>
+        <div className="bg-white rounded-2xl shadow-xl p-6 space-y-5"
+          style={{ border: '1px solid #e2e8f0' }}>
 
-          {/* Name source */}
+          {/* Step 1: Name source */}
           <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
               How should we get your name?
             </p>
             <div className="grid grid-cols-2 gap-3">
               {([
-                { id: 'email',  label: 'Use email name',  sub: user?.displayName || 'From Google account' },
-                { id: 'manual', label: 'Enter manually',  sub: 'Type your full name' },
+                { id: 'email',  label: 'Use email name',    sub: user?.displayName || 'From Google account' },
+                { id: 'manual', label: 'Enter manually',    sub: 'Type your full name' },
               ] as const).map(opt => (
                 <button key={opt.id} onClick={() => setNameMode(opt.id)}
                   className="p-3 rounded-xl border-2 text-left transition-all active:scale-95"
@@ -221,7 +243,8 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1">Middle Name (optional)</label>
                 <Input value={middleName} onChange={e => setMiddleName(e.target.value)}
-                  placeholder="Santos" className="h-10 rounded-xl bg-slate-50 text-sm" />
+                  placeholder="Santos"
+                  className="h-10 rounded-xl bg-slate-50 text-sm" />
               </div>
             </div>
           )}
@@ -231,9 +254,12 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
             <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500 mb-1">
               <IdCard size={11} /> Student ID *
             </label>
-            <Input value={studentId} onChange={e => handleIdChange(e.target.value)}
+            <Input
+              value={studentId}
+              onChange={e => handleIdChange(e.target.value)}
               placeholder="24-12864-481"
-              className="h-11 rounded-xl bg-slate-50 font-mono font-semibold text-sm" />
+              className="h-11 rounded-xl bg-slate-50 font-mono font-semibold text-sm"
+            />
             <p className="text-xs text-slate-400 mt-1">Format: YY-XXXXX-ZZZ · Dashes are inserted automatically</p>
           </div>
 
@@ -277,12 +303,14 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
             </Select>
           </div>
 
+          {/* Error */}
           {error && (
             <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs font-semibold text-red-600">
               {error}
             </div>
           )}
 
+          {/* Actions */}
           <div className="flex gap-3 pt-1">
             <button onClick={onBack}
               className="flex-1 h-11 rounded-xl font-semibold text-sm border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-1.5">
@@ -296,7 +324,7 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
           </div>
 
           <p className="text-center text-xs text-slate-400">
-            Your account will be pending admin verification. You can still use the kiosk while pending.
+            An administrator will review and approve your account. You will be notified via the kiosk.
           </p>
         </div>
       </div>

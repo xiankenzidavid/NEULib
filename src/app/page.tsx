@@ -27,7 +27,6 @@ import {
 import { useUser, useAuth, useFirestore } from '@/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getDocs, collection, query, where, limit } from 'firebase/firestore';
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { UserRecord } from '@/lib/firebase-schema';
 
@@ -49,6 +48,7 @@ export default function Home() {
   const [isCredAuthOpen, setIsCredAuthOpen] = useState(false);
   const [credAuthUser,   setCredAuthUser]   = useState<UserRecord | null>(null);
   const [showCredModal,  setShowCredModal]  = useState(false);
+  const [notRegisteredForAdmin, setNotRegisteredForAdmin] = useState(false);
 
   // Stable callback — prevents SuccessCard useEffect re-running on every render
   const handleCredModalClose = useCallback(() => {
@@ -199,8 +199,8 @@ export default function Home() {
 
       const userRecord = await resolveUserByEmail(email);
       if (!userRecord) {
-        toast({ title: 'Not registered', description: 'Please complete registration first.', variant: 'destructive' });
         setIsCredAuthOpen(false);
+        setNotRegisteredForAdmin(true);
         return;
       }
 
@@ -326,7 +326,7 @@ export default function Home() {
 
         {/* Primary access cards — Kiosk + Admin only, NO Register button */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-2xl">
-          <button onClick={() => setView('terminal')} className="kiosk-button">
+          <button onClick={() => setTimeout(() => setView('terminal'), 120)} className="kiosk-button">
             <div className="kiosk-icon-wrapper"><UserCheck size={30} /></div>
             <div>
               <h2 className="text-xl font-bold text-slate-800" style={{ fontFamily: "'Playfair Display',serif" }}>Kiosk</h2>
@@ -478,6 +478,38 @@ export default function Home() {
         </div>
       )}
 
+      {/* ── Not registered — Contact Admin blocked ── */}
+      {notRegisteredForAdmin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', animation: 'fadeIn 0.2s ease-out' }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300">
+            <div className="px-8 pt-8 pb-7 text-center space-y-5">
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto"
+                style={{ background: 'rgba(239,68,68,0.08)' }}>
+                <span className="text-3xl">🚫</span>
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold text-slate-900" style={{ fontFamily: "'Playfair Display',serif" }}>
+                  Sorry, You're Not Registered Yet
+                </h3>
+                <p className="text-slate-500 text-sm font-medium leading-relaxed">
+                  Please complete your registration first before contacting admin.
+                  Head to the <strong className="text-slate-800">Kiosk</strong> and sign in with your{' '}
+                  <strong className="text-slate-800">@neu.edu.ph</strong> account to get started.
+                </p>
+              </div>
+              <button
+                onClick={() => setNotRegisteredForAdmin(false)}
+                className="w-full h-12 rounded-2xl font-bold text-sm text-white transition-all active:scale-95"
+                style={{ background: 'linear-gradient(135deg,hsl(221,72%,22%),hsl(221,60%,32%))' }}>
+                Got it
+              </button>
+            </div>
+          </div>
+          <style>{`@keyframes fadeIn { from{opacity:0} to{opacity:1} }`}</style>
+        </div>
+      )}
+
       {/* ── Credential request auth dialog ── */}
       {isCredAuthOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -529,53 +561,56 @@ export default function Home() {
         </p>
       </footer>
 
-      {/* ── Admin login dialog ── */}
-      <Dialog open={isAdminLoginOpen} onOpenChange={setIsAdminLoginOpen}>
-        <DialogContent
-          className="border-none shadow-2xl p-0 overflow-hidden [&>button]:hidden"
-          style={{ borderRadius: '1.25rem', width: 'calc(100vw - 2rem)', maxWidth: '420px' }}>
-          <div className="p-6 text-white relative overflow-hidden"
-            style={{ background: 'linear-gradient(135deg,hsl(221,72%,18%),hsl(221,60%,30%))' }}>
-            <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full"
-              style={{ background: 'rgba(255,255,255,0.06)' }} />
-            <button onClick={() => setIsAdminLoginOpen(false)}
-              className="absolute top-4 right-4 z-20 w-8 h-8 flex items-center justify-center rounded-xl transition-all active:scale-95 hover:bg-white/20"
-              style={{ background: 'rgba(255,255,255,0.12)' }}>
-              <X size={15} className="text-white" />
-            </button>
-            <div className="relative z-10 flex items-center gap-3">
-              <div className="p-2.5 rounded-xl" style={{ background: 'rgba(255,255,255,0.12)' }}>
-                <ShieldCheck size={22} className="text-white" />
-              </div>
-              <div>
-                <DialogTitle className="text-xl font-bold text-white" style={{ fontFamily: "'Playfair Display',serif" }}>
-                  Staff Access
-                </DialogTitle>
-                <DialogDescription className="text-white/55 font-medium"
-                  style={{ fontSize: '0.6rem', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-                  Authorized Personnel Only
-                </DialogDescription>
+      {/* ── Admin login dialog — blurred overlay matching Delete modal style ── */}
+      {isAdminLoginOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', animation: 'fadeIn 0.2s ease-out' }}>
+          <div className="w-full overflow-hidden shadow-2xl animate-in zoom-in duration-300"
+            style={{ borderRadius: '1.25rem', maxWidth: '420px', width: 'calc(100vw - 2rem)' }}>
+            <div className="p-6 text-white relative overflow-hidden"
+              style={{ background: 'linear-gradient(135deg,hsl(221,72%,18%),hsl(221,60%,30%))' }}>
+              <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full"
+                style={{ background: 'rgba(255,255,255,0.06)' }} />
+              <button onClick={() => setIsAdminLoginOpen(false)}
+                className="absolute top-4 right-4 z-20 w-8 h-8 flex items-center justify-center rounded-xl transition-all active:scale-95 hover:bg-white/20"
+                style={{ background: 'rgba(255,255,255,0.12)' }}>
+                <X size={15} className="text-white" />
+              </button>
+              <div className="relative z-10 flex items-center gap-3">
+                <div className="p-2.5 rounded-xl" style={{ background: 'rgba(255,255,255,0.12)' }}>
+                  <ShieldCheck size={22} className="text-white" />
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-white" style={{ fontFamily: "'Playfair Display',serif" }}>
+                    Staff Access
+                  </p>
+                  <p className="text-white/55 font-medium"
+                    style={{ fontSize: '0.6rem', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                    Authorized Personnel Only
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
-          <div className="p-6 space-y-5 bg-white">
-            <div className="text-center space-y-1 pb-2">
-              <p className="text-slate-600 text-sm font-medium leading-relaxed">
-                Sign in with your institutional Google account to access the Staff Console.
-              </p>
-              <p className="text-[10px] text-slate-400">Only registered staff members will be granted access.</p>
+            <div className="p-6 space-y-5 bg-white">
+              <div className="text-center space-y-1 pb-2">
+                <p className="text-slate-600 text-sm font-medium leading-relaxed">
+                  Sign in with your institutional Google account to access the Staff Console.
+                </p>
+                <p className="text-[10px] text-slate-400">Only registered staff members will be granted access.</p>
+              </div>
+              <button onClick={handleAdminLogin} disabled={isAuthenticating}
+                className="w-full h-14 rounded-xl border-2 border-slate-200 font-bold text-base text-slate-700 flex items-center justify-center gap-3 active:scale-95 transition-all hover:border-primary/30 hover:bg-slate-50 disabled:opacity-60">
+                {isAuthenticating
+                  ? <Loader2 size={20} className="animate-spin text-primary" />
+                  : <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />}
+                {isAuthenticating ? 'Signing in...' : 'Sign in with Google'}
+              </button>
+              <p className="text-center text-xs text-slate-400">Access is monitored and logged for security.</p>
             </div>
-            <button onClick={handleAdminLogin} disabled={isAuthenticating}
-              className="w-full h-14 rounded-xl border-2 border-slate-200 font-bold text-base text-slate-700 flex items-center justify-center gap-3 active:scale-95 transition-all hover:border-primary/30 hover:bg-slate-50 disabled:opacity-60">
-              {isAuthenticating
-                ? <Loader2 size={20} className="animate-spin text-primary" />
-                : <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />}
-              {isAuthenticating ? 'Signing in...' : 'Sign in with Google'}
-            </button>
-            <p className="text-center text-xs text-slate-400">Access is monitored and logged for security.</p>
           </div>
-        </DialogContent>
-      </Dialog>
+          <style>{`@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }`}</style>
+        </div>
+      )}
     </div>
   );
 }
