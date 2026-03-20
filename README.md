@@ -379,7 +379,7 @@ All staff tabs **plus** additional exclusive tabs:
 
 ## Firestore Data Schema
 
-All users are stored in a **single unified collection** (`/users`). Document IDs are the user's institutional ID (e.g. `24-12864-481`), not the Firebase UID.
+All users are stored in a **single unified collection** (`/users`). Document IDs are the user's institutional ID, not the Firebase UID.
 
 ### `/users/{id}`
 

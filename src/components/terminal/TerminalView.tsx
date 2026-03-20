@@ -319,9 +319,13 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
       setIsVisitor(true);
       return;
     }
+    // Snapshot deptID + program at the exact moment of check-in.
+    // Historical logs are NEVER retroactively changed if the student
+    // later updates their Department or Program in the system.
     addDocumentNonBlocking(collection(db, 'library_logs'), {
       studentId:        identifiedStudent.studentId,
       deptID:           identifiedStudent.deptID,
+      program:          (identifiedStudent as any).program ?? '',
       checkInTimestamp: new Date().toISOString(),
       purpose,
       studentName: `${(identifiedStudent.lastName || '').toUpperCase()}, ${identifiedStudent.firstName}`,
@@ -538,6 +542,15 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
                     ))}
                   </SelectContent>
                 </Select>
+
+                {/* Visual confirmation of selection */}
+                {purpose && (
+                  <div className="flex items-center gap-2 p-3 rounded-xl"
+                    style={{ background: `${navy}08`, border: `1px solid ${navy}20` }}>
+                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: navy }} />
+                    <span className="text-sm font-bold" style={{ color: navy }}>{purpose}</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex w-full gap-3">

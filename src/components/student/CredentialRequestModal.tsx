@@ -140,7 +140,7 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
           description={
             submittedType === 'admin_privilege'
               ? 'Your admin privilege request has been sent. Any active admin can review and approve it in the dashboard.'
-              : 'Your request has been sent to the administrator for review. You will be notified once it has been processed.'
+              : 'Your request has been sent to the administrator for review.'
           }
           onClose={onClose}
         />
@@ -284,12 +284,24 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
                     <SelectValue placeholder="Select department" />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl max-h-60">
-                    {(depts || []).sort((a, b) => a.deptID.localeCompare(b.deptID)).map(d => (
-                      <SelectItem key={d.deptID} value={d.deptID} className="font-semibold text-sm">
-                        <span className="font-bold mr-2 text-xs" style={{ color: navy }}>[{d.deptID}]</span>
-                        {d.departmentName}
-                      </SelectItem>
-                    ))}
+                    {(depts || [])
+                      .sort((a, b) => {
+                        // 1. Define Priority (LIBRARY = 0, Others = 1)
+                        const aPrio = a.deptID === 'LIBRARY' ? 0 : 1;
+                        const bPrio = b.deptID === 'LIBRARY' ? 0 : 1;
+
+                        // 2. Sort by Priority first
+                        if (aPrio !== bPrio) return aPrio - bPrio;
+
+                        // 3. Alphabetical fallback
+                        return a.deptID.localeCompare(b.deptID);
+                      })
+                      .map(d => (
+                        <SelectItem key={d.deptID} value={d.deptID} className="font-semibold text-sm">
+                          <span className="font-bold mr-2 text-xs" style={{ color: navy }}>[{d.deptID}]</span>
+                          {d.departmentName}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -301,7 +313,16 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
                     <SelectValue placeholder={!newDept ? 'Select dept first' : 'Select program'} />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl max-h-60">
-                    {sortedPrograms.map(p => (
+                    {sortedPrograms.sort((a, b) => {
+                      // 1. Define Priority (Anything containing "STAFF" = 0, Others = 1)
+                      const aIsStaff = a.code.toUpperCase().includes('STAFF') ? 0 : 1;
+                      const bIsStaff = b.code.toUpperCase().includes('STAFF') ? 0 : 1;
+
+                      if (aIsStaff !== bIsStaff) return aIsStaff - bIsStaff;
+
+                      // 2. Sort alphabetically by program name for the rest
+                      return a.name.localeCompare(b.name);
+                    }).map(p => (
                       <SelectItem key={p.code} value={p.code} className="font-semibold text-sm">
                         <span className="font-bold mr-2 text-xs font-mono" style={{ color: navy }}>{p.code}</span>
                         {p.name}

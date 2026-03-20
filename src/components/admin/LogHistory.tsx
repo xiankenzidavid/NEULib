@@ -110,6 +110,10 @@ export function LogHistory() {
     return allLogs.filter(l => {
       const matchS  = !s || (l.studentName||'').toLowerCase().includes(s) || l.studentId.toLowerCase().includes(s);
       const matchD  = deptFilter    === 'All Departments' || l.deptID  === deptFilter;
+      // Use log's own snapshotted program (not current user record).
+      // This preserves historical accuracy when a student changes dept/program.
+      const logProgram = l.program || '';
+      const matchProg = programFilter === 'All Programs' || logProgram === programFilter;
       const matchP  = purposeFilter === 'All Purposes'    || l.purpose === purposeFilter;
       // Role filter: look up student's role from userRoleMap
       const userRole = userRoleMap[l.studentId] || 'student';
@@ -123,7 +127,7 @@ export function LogHistory() {
         || (statusFilter === 'Active'    && !l.checkOutTimestamp && isToday(ci))
         || (statusFilter === 'Completed' && !!l.checkOutTimestamp)
         || (statusFilter === 'No Tap'    && noTap);
-      return matchS && matchD && matchP && matchSt && matchRole;
+      return matchS && matchD && matchProg && matchP && matchSt && matchRole;
     }).sort((a, b) => {
       let va = '', vb = '';
       if      (sortField === 'studentName')       { va = a.studentName||''; vb = b.studentName||''; }
@@ -279,8 +283,31 @@ export function LogHistory() {
       {/* Table */}
       <div style={card} className="overflow-hidden">
         {isLoading ? (
-          <div className="py-16 flex items-center justify-center gap-3 text-slate-400">
-            <Loader2 className="animate-spin" size={18} /><span className="text-sm font-medium">Loading history…</span>
+          /* ── Verification loading screen ── */
+          <div className="py-20 flex flex-col items-center justify-center gap-6">
+            {/* Animated rings */}
+            <div className="relative w-20 h-20">
+              <div className="absolute inset-0 rounded-full border-4 border-slate-100" />
+              <div className="absolute inset-0 rounded-full border-4 border-transparent animate-spin"
+                style={{ borderTopColor: navy, animationDuration: '0.9s' }} />
+              <div className="absolute inset-2 rounded-full border-4 border-transparent animate-spin"
+                style={{ borderTopColor: 'hsl(221,60%,60%)', animationDuration: '1.4s', animationDirection: 'reverse' }} />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <History size={20} style={{ color: navy }} />
+              </div>
+            </div>
+            {/* Pulsing text */}
+            <div className="text-center space-y-1.5">
+              <p className="text-sm font-bold text-slate-700 tracking-wide">Verifying Session Archive</p>
+              <p className="text-xs font-medium text-slate-400">Fetching and cross-referencing records…</p>
+            </div>
+            {/* Skeleton rows */}
+            <div className="w-full max-w-2xl space-y-2 px-6">
+              {[100, 80, 90, 70, 85].map((w, i) => (
+                <div key={i} className="h-10 rounded-xl animate-pulse"
+                  style={{ background: `rgba(10,26,77,0.${i % 2 === 0 ? '04' : '06'})`, width: `${w}%` }} />
+              ))}
+            </div>
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-16 text-center">

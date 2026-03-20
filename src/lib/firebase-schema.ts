@@ -70,6 +70,8 @@ export interface LibraryLogRecord {
   id: string;
   studentId: string;
   deptID: string;
+  /** Snapshotted at check-in — never changes even if user updates their profile */
+  program?: string;
   checkInTimestamp: string;
   checkOutTimestamp?: string;
   purpose: string;

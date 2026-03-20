@@ -257,7 +257,6 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
             <Input
               value={studentId}
               onChange={e => handleIdChange(e.target.value)}
-              placeholder="24-12864-481"
               className="h-11 rounded-xl bg-slate-50 font-mono font-semibold text-sm"
             />
             <p className="text-xs text-slate-400 mt-1">Format: YY-XXXXX-ZZZ · Dashes are inserted automatically</p>

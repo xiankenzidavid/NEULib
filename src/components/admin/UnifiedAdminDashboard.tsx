@@ -326,10 +326,10 @@ export default function UnifiedAdminDashboard({
         {menuOpen && (
           <>
             <div className="fixed inset-0 z-[60] lg:hidden"
-              style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+              style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', animation: 'overlayIn 0.25s ease-out' }}
               onClick={() => setMenuOpen(false)} />
             <div className="fixed top-0 left-0 bottom-0 z-[70] lg:hidden flex flex-col w-72"
-              style={{ background: navyGrad, boxShadow: '4px 0 32px rgba(0,0,0,0.35)', paddingBottom: 'env(safe-area-inset-bottom,0px)' }}>
+              style={{ background: navyGrad, boxShadow: '4px 0 32px rgba(0,0,0,0.35)', paddingBottom: 'env(safe-area-inset-bottom,0px)', animation: 'drawerIn 0.3s cubic-bezier(0.32,0.72,0,1)' }}>
               <div className="p-5 border-b border-white/10 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm flex-shrink-0"
@@ -422,6 +422,18 @@ export default function UnifiedAdminDashboard({
           </div>
         </div>
       )}
+
+      {/* Drawer animation keyframes */}
+      <style>{`
+        @keyframes drawerIn {
+          from { transform: translateX(-100%); opacity: 0.6; }
+          to   { transform: translateX(0);     opacity: 1;   }
+        }
+        @keyframes overlayIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
