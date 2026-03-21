@@ -37,7 +37,73 @@ Everything runs serverless: Next.js exports to static files, Firebase handles au
 
 ---
 
-## How the System Works
+## Key Features
+
+### 🖥️ Self-Service Kiosk Terminal
+A touchpoint-style terminal where students identify themselves via **Student ID (RFID simulation)** or **@neu.edu.ph Google login**, pick their visit purpose, and check in or out. The system automatically determines whether to open or close a session. Auto-resets after 5 seconds.
+
+### 🔐 Smart Authentication & Auto-Registration
+New `@neu.edu.ph` users are detected at the kiosk and automatically redirected to the registration form — no separate "Register" button needed. Duplicate Student ID detection prevents double registrations.
+
+### 🚫 Blocked User Intercept
+Two distinct blocked-user scenarios handled gracefully:
+- Blocked student **not** inside → 5-second auto-dismiss alert
+- Blocked student **currently inside** → persistent "contact the admin" modal, no auto-dismiss
+
+### 📋 Contact Admin / Credential Requests
+Students authenticate with Google from the landing page or kiosk success screen and submit change requests (name, student ID, department, admin privilege, or unblock). All require physical verification at the Admin Office before approval. Blocked students can only submit unblock requests.
+
+### 🕐 Live Presence Monitoring
+Real-time table of everyone currently inside the library. Sortable columns, force-checkout on block, and a per-row "Contact Admin" action — all updating live via Firestore `onSnapshot`.
+
+### 📂 Log History — Sessions & Blocked Attempts
+Two-tab archive: all check-in/out session records, and every denied entry attempt. Both fully filterable, sortable, and paginated.
+
+### 🗃️ Student Registry
+Full student database with search, department/status filters, block/unblock toggle, add/edit/delete, and bulk CSV import.
+
+### ⏳ Pending Visitor Approvals
+New registrations that require admin verification queue up here with a live badge count on the nav item.
+
+### 🎯 Visit Purpose Management
+Super admins control what reasons appear on the kiosk in real time — add, reorder, show/hide, or delete purposes directly from the dashboard. Changes reflect on the kiosk immediately.
+
+### ✅ Credential Request Review
+Admins review student-submitted credential change requests with a physical verification gate (`Mark Verified` must be clicked before `Approve` is available). Full revoke flow with preset or custom reason.
+
+### 👥 Staff Access Management
+Register new staff accounts, promote students to admin or super admin, demote, or revoke access entirely.
+
+### 🏛️ Department Management
+Add and manage all NEU college departments. 16 pre-seeded colleges shipped out of the box.
+
+### 📊 Reports Hub
+- Three PDF templates: **Activity & Engagement** (gold), **Violation Report** (red), **Comprehensive Operations** (navy)
+- CSV export for session records
+- **Top 5 Visitors** panel always visible in the right column
+- **AI Insights** panel generated below filters on click
+
+### 🤖 AI-Powered Insights
+Gemini-powered trend analysis via Firebase Genkit. Always produces output — falls back to a fully client-side statistical summary (peak hour, top purpose, top department, unique student count, avg duration) if the API is unavailable.
+
+### 🔍 Audit Log
+Every admin action ever taken — immutable, timestamped, with actor, target, and detail. Covers 20+ action types from `user.block` to `purpose.toggle`.
+
+### 📄 Pagination
+All five data-heavy admin tables have consistent **25 / 50 / 100 / Custom** rows-per-page controls with gold active state and smooth scroll-to-top on page change.
+
+### 🔄 Student ID Change Cascade
+When an ID change is approved, `studentId` is updated atomically across `/library_logs`, `/blocked_attempts`, and `/credential_requests` — so historical records always reflect the current identity.
+
+### 🔒 Firestore Security Rules
+Institutional email gating (`@neu.edu.ph`) on all writes. Create-only audit logs (immutable). Fine-grained role enforcement handled at the UI layer via the `isSuperAdmin` prop.
+
+### 📱 Responsive Design
+Fully mobile-responsive layout with a bottom navigation bar on small screens.
+
+---
+
+
 
 There are **four views** the app can show. Everything routes through `page.tsx`.
 
