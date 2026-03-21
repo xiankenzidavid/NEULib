@@ -5,7 +5,7 @@ import { format, parseISO } from 'date-fns';
 import {
   FileEdit, CheckCircle2, XCircle, ShieldAlert, Clock, User,
   IdCard, GraduationCap, ChevronDown, Loader2, Search, Filter,
-  CheckSquare, Square, ShieldCheck,
+  ShieldCheck,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -23,7 +23,7 @@ interface CredentialRequest {
   studentId:   string;
   studentName: string;
   email:       string;
-  type:        'name' | 'student_id' | 'dept_program' | 'admin_privilege';
+  type:        'name' | 'student_id' | 'dept_program' | 'admin_privilege' | 'unblock_request';
   status:      'pending' | 'approved' | 'partial' | 'revoked' | 'pending_verification';
   current:     Record<string, string>;
   requested:   Record<string, string>;
@@ -54,6 +54,7 @@ const TYPE_META = {
   student_id:      { label: 'Student ID Change',     icon: IdCard,       color: '#7c3aed' },
   dept_program:    { label: 'Dept / Program',        icon: GraduationCap,color: '#059669' },
   admin_privilege: { label: 'Admin Privilege',       icon: ShieldCheck,  color: '#d97706' },
+  unblock_request: { label: 'Unblock Request',        icon: ShieldCheck,  color: '#dc2626' },
 };
 
 const STATUS_META = {
@@ -69,11 +70,6 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
   const db = useFirestore();
   const { user } = useUser();
   const { toast } = useToast();
-
-  // Granular name field approvals
-  const [approveFirst,  setApproveFirst]  = useState(true);
-  const [approveMiddle, setApproveMiddle] = useState(true);
-  const [approveLast,   setApproveLast]   = useState(true);
 
   // Revoke
   const [revoking,      setRevoking]      = useState(false);
@@ -148,23 +144,18 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
 
       // ── Name change ──────────────────────────────────────────────────────
       if (req.type === 'name') {
+        // All-or-nothing approval — no partial field selection.
+        // Physical verification is required (requiresVerification gate enforces this).
         const updates: Record<string, string> = {};
-        if (approveFirst  && req.requested.firstName  !== req.current.firstName)  updates.firstName  = req.requested.firstName;
-        if (approveMiddle && req.requested.middleName !== req.current.middleName) updates.middleName = req.requested.middleName;
-        if (approveLast   && req.requested.lastName   !== req.current.lastName)   updates.lastName   = req.requested.lastName;
+        if (req.requested.firstName  !== req.current.firstName)  updates.firstName  = req.requested.firstName;
+        if (req.requested.middleName !== req.current.middleName) updates.middleName = req.requested.middleName;
+        if (req.requested.lastName   !== req.current.lastName)   updates.lastName   = req.requested.lastName;
 
-        const anyApproved = Object.keys(updates).length > 0;
-        const allApproved = [approveFirst, approveMiddle, approveLast].every(Boolean);
-        const status = anyApproved ? (allApproved ? 'approved' : 'partial') : 'revoked';
-
-        if (anyApproved) {
+        if (Object.keys(updates).length > 0) {
           await updateDoc(doc(db, 'users', req.studentId), updates);
-
-          // Session re-attribution: new session carries the updated name.
-          // The student's old logs keep their original studentName snapshot.
-          const newFirst  = updates.firstName  ?? req.current.firstName  ?? '';
-          const newLast   = updates.lastName   ?? req.current.lastName   ?? '';
-          const newName   = `${newLast.toUpperCase()}, ${newFirst}`;
+          const newFirst = updates.firstName  ?? req.current.firstName  ?? '';
+          const newLast  = updates.lastName   ?? req.current.lastName   ?? '';
+          const newName  = `${newLast.toUpperCase()}, ${newFirst}`;
           try {
             await reattributeSession({
               lookupStudentId: req.studentId,
@@ -176,14 +167,8 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
           }
         }
 
-        await updateDoc(ref, { status, updatedAt: new Date().toISOString(), approvedFields: updates });
-        const changedList = Object.keys(updates).join(', ') || 'none';
-        const msg = status === 'approved'
-          ? `Your name change request has been fully approved. Your name has been updated to: ${updates.firstName || req.current.firstName} ${updates.lastName || req.current.lastName}.`
-          : status === 'partial'
-          ? `Your name change request has been partially approved. Updated fields: ${changedList}.`
-          : 'Your name change request was reviewed but no changes were applied.';
-        writeAuditLog(db, user, 'user.edit', { targetId: req.studentId, targetName: req.studentName, detail: `Credential request (name) ${status}: fields updated — ${changedList}` });
+        await updateDoc(ref, { status: 'approved', updatedAt: new Date().toISOString(), approvedFields: updates });
+        writeAuditLog(db, user, 'user.edit', { targetId: req.studentId, targetName: req.studentName, detail: `Name change approved` });
 
       // ── Dept / Program change ────────────────────────────────────────────
       } else if (req.type === 'dept_program') {
@@ -228,19 +213,58 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
         // 2. Write to new doc with updated ID fields
         await setDoc(doc(db, 'users', newId), { ...oldData, id: newId });
 
-        // 3. Historical log cascade: update studentId on ALL existing logs so they
-        //    remain queryable by the new ID. deptID/program/studentName are untouched.
+        // 3. Historical cascade — update studentId across all collections.
+        //    CRITICAL: always query by req.studentId (the numeric ID stored in log records),
+        //    NOT actualDocId which may be the user's email if the doc was keyed by email.
+        //    Also try actualDocId as a fallback in case some records used it.
+        const idsToMigrate = Array.from(new Set([req.studentId, actualDocId].filter(Boolean)));
+
+        // 3a. library_logs cascade
         try {
-          const logsSnap = await getDocs(
-            query(collection(db, 'library_logs'), where('studentId', '==', actualDocId), limit(500))
-          );
-          if (!logsSnap.empty) {
-            const batch = writeBatch(db);
-            logsSnap.docs.forEach(logDoc => batch.update(logDoc.ref, { studentId: newId }));
-            await batch.commit();
+          for (const oldId of idsToMigrate) {
+            const logsSnap = await getDocs(
+              query(collection(db, 'library_logs'), where('studentId', '==', oldId), limit(500))
+            );
+            if (!logsSnap.empty) {
+              const batch = writeBatch(db);
+              logsSnap.docs.forEach(logDoc => batch.update(logDoc.ref, { studentId: newId }));
+              await batch.commit();
+            }
           }
         } catch (cascadeErr) {
-          console.warn('[CredentialRequestsTab] cascade log update failed:', cascadeErr);
+          console.warn('[CredentialRequestsTab] library_logs cascade failed:', cascadeErr);
+        }
+
+        // 3b. blocked_attempts cascade
+        try {
+          for (const oldId of idsToMigrate) {
+            const blockedSnap = await getDocs(
+              query(collection(db, 'blocked_attempts'), where('studentId', '==', oldId), limit(500))
+            );
+            if (!blockedSnap.empty) {
+              const batch = writeBatch(db);
+              blockedSnap.docs.forEach(d => batch.update(d.ref, { studentId: newId }));
+              await batch.commit();
+            }
+          }
+        } catch (cascadeErr) {
+          console.warn('[CredentialRequestsTab] blocked_attempts cascade failed:', cascadeErr);
+        }
+
+        // 3c. credential_requests cascade
+        try {
+          for (const oldId of idsToMigrate) {
+            const credsSnap = await getDocs(
+              query(collection(db, 'credential_requests'), where('studentId', '==', oldId), limit(500))
+            );
+            if (!credsSnap.empty) {
+              const batch = writeBatch(db);
+              credsSnap.docs.forEach(d => batch.update(d.ref, { studentId: newId }));
+              await batch.commit();
+            }
+          }
+        } catch (cascadeErr) {
+          console.warn('[CredentialRequestsTab] credential_requests cascade failed:', cascadeErr);
         }
 
         // 4. Session re-attribution: if tapped in, close old session (now under newId
@@ -268,7 +292,16 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
       } else if (req.type === 'admin_privilege') {
         await updateDoc(doc(db, 'users', req.studentId), { role: 'admin', status: 'active' });
         await updateDoc(ref, { status: 'approved', updatedAt: new Date().toISOString() });
-        writeAuditLog(db, user, 'role.promote', { targetId: req.studentId, targetName: req.studentName, detail: `Admin privilege granted via credential request` });
+        writeAuditLog(db, user, 'role.promote', { targetId: req.studentId, targetName: req.studentName, detail: `Admin privilege granted via credential request — physical verification completed` });
+
+      } else if (req.type === 'unblock_request') {
+        // Unblock the user in /users
+        await updateDoc(doc(db, 'users', req.studentId), { status: 'active' });
+        await updateDoc(ref, { status: 'approved', updatedAt: new Date().toISOString() });
+        writeAuditLog(db, user, 'user.unblock', {
+          targetId: req.studentId, targetName: req.studentName,
+          detail: `Account unblocked via student unblock request`,
+        });
       }
 
       setSuccessMsg({ title: 'Request Approved', description: 'The student has been notified of the decision.' });
@@ -418,35 +451,6 @@ function ReviewModal({ req, onClose, onDone }: { req: CredentialRequest; onClose
             </div>
           )}
 
-          {/* Granular name field approval */}
-          {req.type === 'name' && !revoking && (
-            <div className="space-y-2">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Select fields to approve</p>
-              {([
-                { key: 'firstName',  label: 'First Name',  val: approveFirst,  set: setApproveFirst  },
-                { key: 'middleName', label: 'Middle Name', val: approveMiddle, set: setApproveMiddle },
-                { key: 'lastName',   label: 'Last Name',   val: approveLast,   set: setApproveLast   },
-              ] as const).map(f => {
-                const changed = req.requested[f.key] !== req.current[f.key];
-                return (
-                  <button key={f.key} onClick={() => changed && f.set(!f.val)}
-                    disabled={!changed}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all"
-                    style={{ borderColor: f.val && changed ? navy : '#e2e8f0', background: f.val && changed ? `${navy}06` : '#fafafa', opacity: changed ? 1 : 0.45 }}>
-                    {f.val && changed ? <CheckSquare size={16} style={{ color: navy }} /> : <Square size={16} className="text-slate-300" />}
-                    <div className="flex-1 min-w-0">
-                      <span className="text-xs font-bold text-slate-500 uppercase">{f.label}</span>
-                      <p className="text-sm">
-                        <span className="text-slate-400 line-through mr-2">{req.current[f.key] || '—'}</span>
-                        <span className="font-bold text-slate-900">{req.requested[f.key] || '—'}</span>
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
           {/* Revoke panel */}
           {revoking && (
             <div className="space-y-3">
@@ -534,6 +538,8 @@ export function CredentialRequestsTab() {
   const [typeFilter,  setTypeFilter]  = useState('all');
   const [statusFilter,setStatusFilter]= useState('all');
   const [reviewing,   setReviewing]   = useState<CredentialRequest | null>(null);
+  const [crRpp,  setCrRpp]  = useState<number>(25);
+  const [crPage, setCrPage] = useState(1);
 
   const reqsQ = useMemoFirebase(
     () => query(collection(db, 'credential_requests'), orderBy('createdAt', 'desc')),
@@ -594,6 +600,7 @@ export function CredentialRequestsTab() {
               <SelectItem value="student_id"      className="text-xs font-semibold">Student ID</SelectItem>
               <SelectItem value="dept_program"    className="text-xs font-semibold">Dept / Program</SelectItem>
               <SelectItem value="admin_privilege" className="text-xs font-semibold">Admin Privilege</SelectItem>
+              <SelectItem value="unblock_request" className="text-xs font-semibold">Unblock Request</SelectItem>
             </SelectContent>
           </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -638,7 +645,7 @@ export function CredentialRequestsTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map(req => {
+                {filtered.slice((crPage-1)*crRpp, crPage*crRpp).map(req => {
                   const tm = TYPE_META[req.type];
                   const sm = STATUS_META[req.status] ?? STATUS_META.pending;
                   const isPending = req.status === 'pending' || req.status === 'pending_verification';
@@ -685,6 +692,46 @@ export function CredentialRequestsTab() {
         )}
       </div>
 
+      {(() => {
+            const _tot = filtered.length;
+            const _pg  = Math.ceil(_tot / crRpp);
+            if (_tot === 0) return null;
+            return (
+              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs font-medium text-slate-400">
+                    {(crPage-1)*crRpp+1}&ndash;{Math.min(crPage*crRpp,_tot)} of {_tot}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">Rows per page:</span>
+                    <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100">
+                      {([25,50,100] as const).map(n=>(
+                        <button key={n} onClick={()=>{ setCrRpp(n); setCrPage(1); }}
+                          className="px-2.5 py-1 rounded-md text-xs font-bold transition-all"
+                          style={crRpp===n?{background:'hsl(43,85%,50%)',color:'white'}:{color:'#64748b'}}>{n}</button>
+                      ))}
+                      <button onClick={()=>{const v=parseInt(prompt('Rows per page (10-500):',String(crRpp))||String(crRpp));if(!isNaN(v)&&v>=10&&v<=500){ setCrRpp(v); setCrPage(1);}}}
+                        className="px-2.5 py-1 rounded-md text-xs font-bold text-slate-500 hover:bg-white transition-all">Custom</button>
+                    </div>
+                  </div>
+                </div>
+                {_pg>1&&(
+                  <div className="flex items-center gap-1">
+                    <button onClick={()=>{ setCrPage(1); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={crPage===1} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#171;&#171;</button>
+                    <button onClick={()=>{ setCrPage((p:number)=>Math.max(1,p-1)); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={crPage===1} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#8249;</button>
+                    {Array.from({length:_pg},(_,i)=>i+1)
+                      .filter(p=>p===1||p===_pg||Math.abs(p-crPage)<=1)
+                      .reduce<(number|string)[]>((acc,p,i,a)=>{if(i>0&&(p as number)-(a[i-1] as number)>1)acc.push('...');acc.push(p);return acc;},[])
+                      .map((p,i)=>p==='...'?<span key={'e'+i} className="px-1 text-slate-400 text-xs">&#8230;</span>
+                        :<button key={p} onClick={()=>{ setCrPage(p as number); window.scrollTo({top:0,behavior:'smooth'}); }} className="h-7 w-7 rounded-lg text-xs font-bold border transition-all"
+                           style={crPage===p?{background:'hsl(43,85%,50%)',color:'white',border:'none'}:{borderColor:'#e2e8f0',color:'#64748b'}}>{p}</button>)}
+                    <button onClick={()=>{ setCrPage((p:number)=>Math.min(_pg,p+1)); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={crPage===_pg} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#8250;</button>
+                    <button onClick={()=>{ setCrPage(_pg); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={crPage===_pg} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#187;&#187;</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
       {reviewing && (
         <ReviewModal
           req={reviewing}

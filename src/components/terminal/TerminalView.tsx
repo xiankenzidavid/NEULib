@@ -14,6 +14,7 @@ import { isToday, parseISO } from 'date-fns';
 import { formatStudentId } from '@/lib/student-id-formatter';
 import { libraryLogId } from '@/lib/firestore-ids';
 import { StudentRecord, UserRecord, DEPARTMENTS, PROGRAMS, ProgramRecord } from '@/lib/firebase-schema';
+import { CredentialRequestModal } from '@/components/student/CredentialRequestModal';
 
 const FALLBACK_PURPOSES = [
   { value: 'Reading Books', label: 'Reading & Private Study' },
@@ -53,6 +54,8 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
   const [showNotRegistered, setShowNotRegistered] = useState(false);
   const [isRegisteringFromPopup, setIsRegisteringFromPopup] = useState(false);
   const [blockedStudent,    setBlockedStudent]    = useState<{ name: string } | null>(null);
+  const [blockedCountdown,  setBlockedCountdown]  = useState(5);
+  const [blockedInsideModal, setBlockedInsideModal] = useState(false); // shows when blocked user tries to checkout
   const [sessionDuration,   setSessionDuration]   = useState<{ hours: number; minutes: number } | null>(null);
 
   // Dept/program for visitors
@@ -61,6 +64,10 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
   const [allDepts,        setAllDepts]        = useState<{ deptID: string; departmentName: string }[]>([]);
   const [deptPrograms,    setDeptPrograms]    = useState<ProgramRecord[]>([]);
   const [isLoadingProgs,  setIsLoadingProgs]  = useState(false);
+
+  // Contact admin modal state
+  const [showContactAdmin, setShowContactAdmin] = useState(false);
+  const [contactAdminUser, setContactAdminUser] = useState<UserRecord | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -155,6 +162,19 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
 
   useEffect(() => { if (step === 'success' && countdown <= 0) handleReset(); }, [step, countdown]);
 
+  // Auto-dismiss blocked alert after 5 seconds
+  useEffect(() => {
+    if (!blockedStudent) { setBlockedCountdown(5); return; }
+    setBlockedCountdown(5);
+    const interval = setInterval(() => {
+      setBlockedCountdown(prev => {
+        if (prev <= 1) { clearInterval(interval); setBlockedStudent(null); return 5; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [blockedStudent]);
+
   const handleReset = () => {
     const wasAdmin = identifiedStudent?.role === 'admin' || identifiedStudent?.role === 'super_admin';
     setStep('auth'); setRfidInput(''); setIdentifiedStudent(null);
@@ -170,6 +190,26 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
     else           { setStep('purpose'); }
   };
 
+  // Checks if a blocked user has an active session today → shows "blocked inside" modal.
+  // Returns true if an active session was found (caller should not show entry-restriction modal).
+  const checkBlockedActiveSession = async (studentId: string): Promise<boolean> => {
+    try {
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const q = query(
+        collection(db, 'library_logs'),
+        where('studentId', '==', studentId),
+        where('checkInTimestamp', '>=', todayStart.toISOString()),
+        orderBy('checkInTimestamp', 'desc'), limit(1)
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty && !snap.docs[0].data().checkOutTimestamp) {
+        setBlockedInsideModal(true);
+        return true;
+      }
+    } catch { /* non-fatal */ }
+    return false;
+  };
+
   const checkExistingLogs = async (student: StudentRecord, needsDept: boolean) => {
     const q = query(collection(db, 'library_logs'),
       where('studentId', '==', student.studentId),
@@ -179,6 +219,14 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
     if (!snap.empty) {
       const log = snap.docs[0].data();
       if (!log.checkOutTimestamp && isToday(parseISO(log.checkInTimestamp))) {
+        // Blocked checkout intercept: if student is blocked and trying to check out,
+        // show a persistent modal instead of completing the checkout
+        if (student.isBlocked || (student as any).status === 'blocked') {
+          setIdentifiedStudent(student);
+          setBlockedInsideModal(true);
+          return;
+        }
+
         const checkOutNow = new Date();
         updateDocumentNonBlocking(doc(db, 'library_logs', snap.docs[0].id),
           { checkOutTimestamp: checkOutNow.toISOString() });
@@ -216,12 +264,18 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
       if (userDoc.exists()) {
         const data = userDoc.data() as UserRecord;
         if (data.status === 'blocked') {
-          setBlockedStudent({ name: data.firstName || 'Student' });
-          // Log the blocked attempt for admin visibility
+          const sid = data.id || cleanId;
+          // If they have an active session today, show "blocked inside" modal instead
+          const isInside = await checkBlockedActiveSession(sid);
+          if (!isInside) {
+            // Not inside — show entry restriction (auto-dismisses in 5s)
+            setBlockedStudent({ name: data.firstName || 'Student' });
+          }
+          // Always log the blocked attempt
           try {
             const attemptRef = doc(collection(db, 'blocked_attempts'));
             setDoc(attemptRef, {
-              studentId:   data.id || cleanId,
+              studentId:   sid,
               studentName: `${(data.lastName||'').toUpperCase()}, ${data.firstName||''}`,
               deptID:      data.deptID || '',
               program:     data.program || '',
@@ -322,7 +376,10 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
       if (!uSnap.empty) {
         const u = uSnap.docs[0].data() as UserRecord;
         if (u.status === 'blocked') {
-          setBlockedStudent({ name: u.firstName || 'Student' });
+          const isInside = await checkBlockedActiveSession(u.id);
+          if (!isInside) {
+            setBlockedStudent({ name: u.firstName || 'Student' });
+          }
           try {
             const attemptRef = doc(collection(db, 'blocked_attempts'));
             setDoc(attemptRef, {
@@ -725,6 +782,7 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
             </div>
           );
         })()}
+
         {/* ── BLOCKED STUDENT POPUP ── */}
         {blockedStudent && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -743,12 +801,79 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
                     Hi! <strong>{blockedStudent.name}</strong>, you're prohibited from entering the library.
                     Please contact the admin.
                   </p>
+                  {/* Countdown bar */}
+                  <div className="mt-2">
+                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-red-400 rounded-full transition-all duration-1000"
+                        style={{ width: `${(blockedCountdown / 5) * 100}%` }} />
+                    </div>
+                    <p className="text-xs text-slate-400 font-medium mt-1 text-center">
+                      Dismissing in {blockedCountdown}s
+                    </p>
+                  </div>
                 </div>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => {
+                      setBlockedStudent(null);
+                      // Pre-fill user info for the contact modal
+                      if (identifiedStudent) {
+                        setContactAdminUser(identifiedStudent);
+                        setShowContactAdmin(true);
+                      }
+                    }}
+                    className="w-full h-12 rounded-2xl font-bold text-sm text-white transition-all"
+                    style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}
+                  >
+                    Contact Admin
+                  </button>
+                  <button
+                    onClick={() => setBlockedStudent(null)}
+                    className="w-full h-12 rounded-2xl font-bold text-sm text-slate-600 border border-slate-200 hover:bg-slate-50"
+                  >
+                    Understood
+                  </button>
+                </div>
+              </div>
+            </div>
+            <style>{`@keyframes fadeIn { from{opacity:0} to{opacity:1} }`}</style>
+          </div>
+        )}
+
+
+        {/* ── BLOCKED INSIDE MODAL — persistent, no auto-dismiss ── */}
+        {blockedInsideModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(12px)', animation: 'fadeIn 0.2s ease-out' }}>
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300">
+              {/* Red header band */}
+              <div className="h-2 w-full" style={{ background: 'linear-gradient(90deg,#dc2626,#ef4444)' }} />
+              <div className="px-7 py-7 text-center space-y-4">
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto"
+                  style={{ background: 'rgba(220,38,38,0.08)' }}>
+                  <span className="text-4xl">⛔</span>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-bold text-slate-900" style={{ fontFamily: "'Playfair Display',serif" }}>
+                    Account Blocked
+                  </h3>
+                  <p className="text-slate-600 text-sm font-medium leading-relaxed">
+                    You have been <strong className="text-red-600">blocked</strong> while inside the library.
+                  </p>
+                  <p className="text-slate-500 text-sm leading-relaxed">
+                    Please proceed to the Admin Office for assistance before leaving.
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl border border-red-100" style={{ background: 'rgba(254,242,242,0.8)' }}>
+                  <p className="text-xs font-bold text-red-700 uppercase tracking-wide">Action Required</p>
+                  <p className="text-xs text-red-600 mt-1">Contact the Library Admin to resolve your account status.</p>
+                </div>
+                {/* No dismiss button — admin must intervene. Only "Understood" after reading. */}
                 <button
-                  onClick={() => setBlockedStudent(null)}
+                  onClick={() => { setBlockedInsideModal(false); handleReset(); }}
                   className="w-full h-12 rounded-2xl font-bold text-sm text-white transition-all active:scale-95"
                   style={{ background: 'linear-gradient(135deg,#dc2626,#b91c1c)' }}>
-                  Understood
+                  I Understand
                 </button>
               </div>
             </div>
@@ -800,6 +925,20 @@ export default function TerminalView({ onComplete, onAdminReturn, onRegister, pr
               </div>
             </div>
             <style>{`@keyframes fadeIn { from{opacity:0} to{opacity:1} }`}</style>
+          </div>
+        )}
+
+        {/* ── CredentialRequestModal for blocked users ── */}
+        {showContactAdmin && contactAdminUser && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)' }}>
+            <CredentialRequestModal
+              profile={contactAdminUser}
+              onClose={() => {
+                setShowContactAdmin(false);
+                setContactAdminUser(null);
+              }}
+            />
           </div>
         )}
 

@@ -114,7 +114,7 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
     if (!firstName.trim() || !lastName.trim()) { setError('First and last name are required.'); return; }
     if (!studentId.trim()) { setError('Student ID is required.'); return; }
     if (!/^\d{2}-\d{5}-\d{3}$/.test(studentId.trim())) {
-      setError('Student ID format: YY-XXXXX-ZZZ (e.g. 24-12864-481)'); return;
+      setError('Student ID format: YY-XXXXX-ZZZ'); return;
     }
     if (!deptId) { setError('Please select your department.'); return; }
     if (!user?.email) return;
@@ -272,7 +272,7 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
             <Input
               value={studentId}
               onChange={e => handleIdChange(e.target.value)}
-              placeholder="24-12864-481"
+              placeholder="XX-YYYYY-ZZZ"
               className="h-11 rounded-xl bg-slate-50 font-mono font-semibold text-sm"
             />
             <p className="text-xs text-slate-400 mt-1">Format: YY-XXXXX-ZZZ · Dashes are inserted automatically</p>
@@ -339,7 +339,7 @@ export default function RegistrationPage({ onSubmitted, onBack }: Props) {
           </div>
 
           <p className="text-center text-xs text-slate-400">
-            An administrator will review and approve your account. You will be notified via the kiosk.
+            An administrator will review and approve your account. You may now enter the library.
           </p>
         </div>
       </div>

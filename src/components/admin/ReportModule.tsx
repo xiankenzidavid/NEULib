@@ -61,7 +61,6 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
   const [successCard,   setSuccessCard]   = useState<{ title: string; description: string; color?: 'green' | 'navy' | 'amber' } | null>(null);
   const [pdfPreview,    setPdfPreview]    = useState<{ url: string; filename: string } | null>(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
-  const [topVisitorsOpen,  setTopVisitorsOpen]  = useState(false);   // collapsed by default
   const [userStatusFilter, setUserStatusFilter] = useState<'all' | 'active' | 'blocked'>('active');
   const [rowsPerPage,      setRowsPerPage]      = useState<number>(50);
   const [currentPage,      setCurrentPage]      = useState(1);
@@ -153,10 +152,20 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
     setCurrentPage(1);
   };
 
+  const handleResetSort = () => {
+    setArchiveSortField('checkInTimestamp'); setArchiveSortOrder('desc');
+    setCurrentPage(1);
+  };
+
+  // Button 1 (filter panel): appears when ANY filter or sort is changed
   const isFiltersDirty =
     deptFilter !== 'All Departments' || programFilter !== 'All Programs' ||
     purposeFilter !== 'All Purposes' || tapOutFilter !== 'all'           ||
     userStatusFilter !== 'active'    || archiveSearch.trim() !== ''      ||
+    archiveSortField !== 'checkInTimestamp' || archiveSortOrder !== 'desc';
+
+  // Button 2 (archive header): appears only when sort is changed — resets sort only
+  const isSortDirty =
     archiveSortField !== 'checkInTimestamp' || archiveSortOrder !== 'desc';
 
   const logsRef = useMemoFirebase(() => collection(db, 'library_logs'), [db]);
@@ -230,6 +239,41 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
     | { _type: 'blocked'; _ts: string; data: NonNullable<typeof blockedAttempts>[0] };
 
   const unifiedRows = useMemo((): UnifiedRow[] => {
+    // ── Sort comparator — works across both row types ──────────────────────
+    const compare = (a: UnifiedRow, b: UnifiedRow): number => {
+      const getVal = (r: UnifiedRow, field: typeof archiveSortField): string | number => {
+        if (r._type === 'blocked') {
+          // Blocked rows only have: studentName, studentId, deptID, program, timestamp
+          if (field === 'studentName')      return r.data.studentName || '';
+          if (field === 'studentId')        return r.data.studentId || '';
+          if (field === 'deptID')           return r.data.deptID || '';
+          if (field === 'program')          return r.data.program || userProgramMap[r.data.studentId] || '';
+          if (field === 'checkInTimestamp') return r.data.timestamp || '';
+          return ''; // purpose / duration / checkOutTimestamp — not applicable
+        }
+        const l = r.data;
+        if (field === 'studentName')        return l.studentName || '';
+        if (field === 'studentId')          return l.studentId || '';
+        if (field === 'deptID')             return l.deptID || '';
+        if (field === 'program')            return (l as LogRecord).program || userProgramMap[l.studentId] || '';
+        if (field === 'purpose')            return l.purpose || '';
+        if (field === 'checkInTimestamp')   return l.checkInTimestamp || '';
+        if (field === 'checkOutTimestamp')  return l.checkOutTimestamp || '';
+        if (field === 'duration') {
+          if (!l.checkOutTimestamp) return 0;
+          return differenceInMinutes(parseISO(l.checkOutTimestamp), parseISO(l.checkInTimestamp));
+        }
+        return '';
+      };
+      const vA = getVal(a, archiveSortField);
+      const vB = getVal(b, archiveSortField);
+      if (typeof vA === 'number' && typeof vB === 'number') {
+        return archiveSortOrder === 'asc' ? vA - vB : vB - vA;
+      }
+      const cmp = String(vA).localeCompare(String(vB));
+      return archiveSortOrder === 'asc' ? cmp : -cmp;
+    };
+
     if (userStatusFilter === 'blocked') {
       // Pure blocked view — apply date range filter
       const s  = startOfDay(parseISO(startDate));
@@ -242,20 +286,16 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
           const inSearch = !search || (a.studentName||'').toLowerCase().includes(search) || (a.studentId||'').toLowerCase().includes(search);
           return inRange && inSearch;
         })
-        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-        .map(a => ({ _type: 'blocked' as const, _ts: a.timestamp, data: a }));
+        .map(a => ({ _type: 'blocked' as const, _ts: a.timestamp, data: a }))
+        .sort(compare);
     }
     if (userStatusFilter === 'all') {
-      // Merge sessions + blocked attempts chronologically.
-      // Purpose leakage fix: if a purpose filter is active, blocked attempts have no
-      // purpose data and must be excluded to avoid polluting purpose-specific analytics.
       const sessions: UnifiedRow[] = filteredLogs.map(l => ({ _type: 'session' as const, _ts: l.checkInTimestamp, data: l }));
       const purposeFiltered = purposeFilter !== 'All Purposes';
       const blockedRows: UnifiedRow[] = purposeFiltered
-        ? [] // blocked entries have no purpose — hide them when purpose filter is active
+        ? []
         : (blockedAttempts || [])
             .filter(a => {
-              // Date-range filter for blocked attempts
               const ts = parseISO(a.timestamp);
               const s  = startOfDay(parseISO(startDate));
               const e  = endOfDay(parseISO(endDate));
@@ -266,18 +306,20 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
       return [...sessions, ...blockedRows]
         .filter(r => {
           if (!search) return true;
-          const name = r.data.studentName || '';
-          const id   = r.data.studentId || '';
-          return name.toLowerCase().includes(search) || id.toLowerCase().includes(search);
+          return (r.data.studentName||'').toLowerCase().includes(search) ||
+                 (r.data.studentId||'').toLowerCase().includes(search);
         })
-        .sort((a, b) => b._ts.localeCompare(a._ts));
+        .sort(compare);
     }
-    // ACTIVE: all successful sessions (no blocked entries mixed in)
+    // ACTIVE: all successful sessions only
     const search = archiveSearch.toLowerCase();
     return filteredLogs
       .filter(l => !search || (l.studentName||'').toLowerCase().includes(search) || (l.studentId||'').toLowerCase().includes(search))
-      .map(l => ({ _type: 'session' as const, _ts: l.checkInTimestamp, data: l }));
-  }, [filteredLogs, blockedAttempts, userStatusFilter, archiveSearch]);
+      .map(l => ({ _type: 'session' as const, _ts: l.checkInTimestamp, data: l }))
+      .sort(compare);
+  }, [filteredLogs, blockedAttempts, userStatusFilter, archiveSearch,
+      archiveSortField, archiveSortOrder, userProgramMap,
+      startDate, endDate, purposeFilter]);
 
   // Paginated slice — unified rows
   const totalPages    = Math.ceil(unifiedRows.length / rowsPerPage);
@@ -421,8 +463,23 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
   // Template C: ALL      — Comprehensive Library Operations Report
   // ══════════════════════════════════════════════════════════════════════════
 
-  const generatePDF = (disposition: 'download' | 'view') => {
+  const generatePDF = async (disposition: 'download' | 'view') => {
     setPdfGenerating(true);
+
+    // ── Fetch NEU logo as base64 for embedding (from Next.js /public folder) ──
+    let neuLogoBase64: string | null = null;
+    try {
+      const resp = await fetch('/neu-logo.png');
+      if (resp.ok) {
+        const blob = await resp.blob();
+        neuLogoBase64 = await new Promise<string>(resolve => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch { /* logo unavailable — skip it */ }
+
     setTimeout(() => {
     try {
       // ── Shared constants ───────────────────────────────────────────────────
@@ -470,6 +527,14 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
         pdf.rect(0, 0, W, 52, 'F');
         pdf.setFillColor(...accentColor);
         pdf.rect(0, 52, W, 2, 'F');
+
+        // NEU logo — top-left corner of the navy banner (if available)
+        if (neuLogoBase64) {
+          try {
+            pdf.addImage(neuLogoBase64, 'PNG', 8, 6, 38, 38);
+          } catch { /* skip if format unsupported */ }
+        }
+
         pdf.setTextColor(255, 255, 255);
         pdf.setFontSize(17); pdf.setFont('helvetica', 'bold');
         pdf.text(title, W / 2, 17, { align: 'center' });
@@ -735,8 +800,10 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
           peakTimeCard = { label: 'Peak Attendance Day', value: peakDay, sub: `${peakEntry[1]} visits that day`, accent: GRN };
         }
 
+        const aNoTap = logs.filter(l => !l.checkOutTimestamp && !isToday(parseISO(l.checkInTimestamp))).length;
         const cards: { label: string; value: string; sub: string; accent?: [number,number,number] }[] = [
-          { label: 'Total Visitors',        value: String(uniqV),        sub: `across ${logs.length} total session${logs.length !== 1 ? 's' : ''}`, accent: NAVY },
+          { label: 'Total Log Entries',     value: String(logs.length),  sub: `${activeCount} active · ${aNoTap} no tap-out`, accent: NAVY },
+          { label: 'Total Visitors',        value: String(uniqV),        sub: `unique students in period`, accent: NAVY },
           ...(activeCount > 0 ? [{ label: 'Active Now',    value: String(activeCount), sub: 'currently checked in', accent: [29,78,216] as [number,number,number] }] : []),
           { label: 'Avg Session Duration',  value: avgDur,               sub: `${completed.length} completed session${completed.length !== 1 ? 's' : ''}`, accent: NAVY },
           { label: 'Top Visit Purpose',     value: topPurpose,           sub: 'most common reason', accent: NAVY },
@@ -774,14 +841,25 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
             const dur = l.checkOutTimestamp ? (() => { const m = differenceInMinutes(parseISO(l.checkOutTimestamp), ci); return m < 60 ? `${m}m` : `${Math.floor(m/60)}h ${m%60}m`; })() : '-';
             return [l.studentName||'-', l.studentId||'-', l.deptID||'-', (l as LogRecord).program || userProgramMap[l.studentId] || '-', l.purpose||'-', format(ci,'MMM d, h:mm a'), l.checkOutTimestamp ? format(parseISO(l.checkOutTimestamp),'h:mm a') : '-', dur, status];
           }),
-          headStyles:         { fillColor: NAVY, textColor: 255, fontStyle: 'bold', fontSize: 9 },
-          bodyStyles:         { fontSize: 8.5 },
+          headStyles:         { fillColor: NAVY, textColor: 255, fontStyle: 'bold', fontSize: 9.5 },
+          bodyStyles:         { fontSize: 9 },
           alternateRowStyles: { fillColor: LIGHT },
           showHead: 'everyPage',
-          columnStyles: { 0:{cellWidth:32,fontStyle:'bold'}, 1:{cellWidth:24,font:'courier',fontSize:7}, 2:{cellWidth:12,halign:'center',fontStyle:'bold'}, 3:{cellWidth:16,fontSize:7}, 4:{cellWidth:22}, 5:{cellWidth:26}, 6:{cellWidth:18}, 7:{cellWidth:12,halign:'center'}, 8:{cellWidth:16,halign:'center',fontStyle:'bold'} },
-          styles:      { cellPadding:{top:2.5,bottom:2.5,left:2,right:2}, overflow:'linebreak' },
-          tableWidth:  194,
-          margin:      { left:8, right:8 },
+          // A4 usable width = 210 - 14 - 14 = 182mm. Columns sum = 182.
+          columnStyles: {
+            0: { cellWidth: 36, fontStyle: 'bold' },            // Student
+            1: { cellWidth: 24, font: 'courier', fontSize: 8.5 }, // ID
+            2: { cellWidth: 12, halign: 'center', fontStyle: 'bold' }, // Dept
+            3: { cellWidth: 18, fontSize: 8.5 },                 // Program
+            4: { cellWidth: 22 },                                // Purpose
+            5: { cellWidth: 26 },                                // Time In
+            6: { cellWidth: 18 },                                // Time Out
+            7: { cellWidth: 10, halign: 'center' },              // Dur
+            8: { cellWidth: 16, halign: 'center', fontStyle: 'bold' }, // Status
+          },
+          styles: { cellPadding: { top: 3, bottom: 3, left: 2.5, right: 2.5 }, overflow: 'linebreak' },
+          tableWidth: 182,
+          margin: { left: 14, right: 14 },
           didParseCell(data) {
             if (data.section !== 'body') return;
             const row = logs[data.row.index]; if (!row) return;
@@ -863,12 +941,21 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
             a.timestamp ? format(parseISO(a.timestamp), 'MMM d, h:mm a') : '-',
             'DENIED',
           ]),
-          headStyles:   { fillColor: RED_MED, textColor: 255, fontStyle: 'bold', fontSize: 9 },
-          bodyStyles:   { fontSize: 8.5 },
+          headStyles:   { fillColor: RED_MED, textColor: 255, fontStyle: 'bold', fontSize: 9.5 },
+          bodyStyles:   { fontSize: 9 },
           showHead: 'everyPage',
-          columnStyles: { 0:{cellWidth:36,fontStyle:'bold'}, 1:{cellWidth:26,font:'courier',fontSize:8}, 2:{cellWidth:16,halign:'center',fontStyle:'bold'}, 3:{cellWidth:22,fontSize:8}, 4:{cellWidth:38}, 5:{cellWidth:16,halign:'center',fontStyle:'bold'} },
-          styles:  { cellPadding:{top:2.5,bottom:2.5,left:2,right:2}, overflow:'linebreak' },
-          tableWidth: 154, margin: { left:8, right:8 },
+          // Legacy schema: Student | ID | Dept | Program | Timestamp | Status
+          // A4 usable width 182mm, 6 columns
+          columnStyles: {
+            0: { cellWidth: 46, fontStyle: 'bold' },            // Student
+            1: { cellWidth: 30, font: 'courier', fontSize: 8.5 }, // Student ID
+            2: { cellWidth: 16, halign: 'center', fontStyle: 'bold' }, // Dept
+            3: { cellWidth: 30, fontSize: 8.5 },                 // Program
+            4: { cellWidth: 36 },                                // Timestamp
+            5: { cellWidth: 24, halign: 'center', fontStyle: 'bold' }, // Status
+          },
+          styles: { cellPadding: { top: 3, bottom: 3, left: 2.5, right: 2.5 }, overflow: 'linebreak' },
+          tableWidth: 182, margin: { left: 14, right: 14 },
           didParseCell(data) {
             if (data.section !== 'body') return;
             // Pastel pink on all rows — professional, not eye-wrenching
@@ -915,7 +1002,7 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
 
         drawHeader([62, 92, 155], 'COMPREHENSIVE LIBRARY OPERATIONS REPORT', 'New Era University - Full Traffic Analysis', filterCtx);
 
-        let y = drawTOC(['Executive Summary', 'Total Library Traffic Volume', 'Combined Session Archive'], 62);
+        let y = drawTOC(['Executive Summary', 'Total Library Traffic Volume', 'Unified Session Archive'], 62);
 
         pdf.setFontSize(11); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(...NAVY);
         pdf.text('1.  Executive Summary', 14, y); y += 7;
@@ -957,7 +1044,8 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
         const uniqAll = new Set(logs.map(l => l.studentId)).size;
 
         const cards = [
-          { label: 'Total Visitors',     value: String(uniqAll),                    sub: `${totalSuccess} sessions + ${totalDenied} denied`, accent: NAVY },
+          { label: 'Total Log Entries',  value: String(totalReqs),                  sub: `${totalSuccess} sessions · ${totalDenied} denied`,  accent: NAVY },
+          { label: 'Total Visitors',     value: String(uniqAll),                    sub: `unique students in period`,                          accent: NAVY },
           { label: 'Traffic Snapshot',   value: `${successPct}% / ${deniedPct}%`,   sub: 'Success vs Denied ratio',                           accent: GRN  },
           { label: 'Avg Session Duration', value: avgDurAll,                         sub: `${completedAll.length} completed sessions`,          accent: NAVY },
           { label: 'Top Visit Purpose',  value: topPurpAll,                          sub: 'most common reason',                                accent: NAVY },
@@ -977,65 +1065,80 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
         pdf.addPage();
         pdf.setFillColor(62, 92, 155); pdf.rect(0, 0, W, 12, 'F');
         pdf.setFontSize(10); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(255, 255, 255);
-        pdf.text('3.  Combined Session Archive - All Traffic', W / 2, 8, { align: 'center' });
+        pdf.text('3.  Unified Session Archive  (Sessions + Blocked Attempts)', W / 2, 8, { align: 'center' });
 
-        // Successful sessions
-        pdf.setFontSize(9); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(...NAVY);
-        pdf.text('A.  Successful Sessions', 8, 22);
-        autoTable(pdf, {
-          startY: 26,
-          head: [['Student', 'ID', 'Dept', 'Program', 'Purpose', 'Time In', 'Time Out', 'Dur', 'Status']],
-          body: logs.map(l => {
+        // ── Unified chronological table: sessions + blocked attempts merged ──────
+        // Schema: Student | ID | Dept | Program | Purpose | Time In | Time Out | Dur | Status
+        // Blocked rows: Purpose='-', Time Out='-', Dur='-', Status='BLOCKED'
+        type AllRow = { isBlocked: boolean; name: string; id: string; dept: string; prog: string;
+                        purpose: string; timeIn: string; timeOut: string; dur: string; status: string; };
+        const allRowsSorted: AllRow[] = [
+          ...logs.map(l => {
             const ci = parseISO(l.checkInTimestamp);
             const isAct = !l.checkOutTimestamp && isToday(ci);
             const status = l.checkOutTimestamp ? 'Done' : isAct ? 'Active' : 'No Tap';
             const dur = l.checkOutTimestamp ? (() => { const m = differenceInMinutes(parseISO(l.checkOutTimestamp), ci); return m < 60 ? `${m}m` : `${Math.floor(m/60)}h ${m%60}m`; })() : '-';
-            return [l.studentName||'-', l.studentId||'-', l.deptID||'-', (l as LogRecord).program||userProgramMap[l.studentId]||'-', l.purpose||'-', format(ci,'MMM d, h:mm a'), l.checkOutTimestamp?format(parseISO(l.checkOutTimestamp),'h:mm a'):'-', dur, status];
+            return { isBlocked: false, name: l.studentName||'-', id: l.studentId||'-', dept: l.deptID||'-',
+              prog: (l as LogRecord).program||userProgramMap[l.studentId]||'-', purpose: l.purpose||'-',
+              timeIn: format(ci,'MMM d, h:mm a'), timeOut: l.checkOutTimestamp?format(parseISO(l.checkOutTimestamp),'h:mm a'):'-',
+              dur, status, _ts: l.checkInTimestamp };
           }),
-          headStyles:  { fillColor: [62,92,155] as [number,number,number], textColor:255, fontStyle:'bold', fontSize:9 },
-          bodyStyles:  { fontSize:8.5 },
+          ...attempts.map(a => ({
+            isBlocked: true, name: a.studentName||'-', id: a.studentId||'-', dept: a.deptID||'-',
+            prog: a.program||userProgramMap[a.studentId]||'-', purpose: '-',
+            timeIn: a.timestamp ? format(parseISO(a.timestamp),'MMM d, h:mm a') : '-',
+            timeOut: '-', dur: '-', status: 'BLOCKED', _ts: a.timestamp||'',
+          })),
+        ].sort((a, b) => (b as any)._ts.localeCompare((a as any)._ts));
+
+        autoTable(pdf, {
+          startY: 16,
+          head: [['Student', 'ID', 'Dept', 'Program', 'Purpose', 'Time In', 'Time Out', 'Dur', 'Status']],
+          body: allRowsSorted.map(r => [r.name, r.id, r.dept, r.prog, r.purpose, r.timeIn, r.timeOut, r.dur, r.status]),
+          headStyles:  { fillColor: [62,92,155] as [number,number,number], textColor:255, fontStyle:'bold', fontSize:9.5 },
+          bodyStyles:  { fontSize:9 },
           alternateRowStyles: { fillColor: LIGHT },
           showHead: 'everyPage',
-          columnStyles: { 0:{cellWidth:30,fontStyle:'bold'}, 1:{cellWidth:22,font:'courier',fontSize:6.5}, 2:{cellWidth:12,halign:'center',fontStyle:'bold'}, 3:{cellWidth:15,fontSize:6.5}, 4:{cellWidth:20}, 5:{cellWidth:24}, 6:{cellWidth:17}, 7:{cellWidth:11,halign:'center'}, 8:{cellWidth:15,halign:'center',fontStyle:'bold'} },
-          styles: { cellPadding:{top:2,bottom:2,left:2,right:2}, overflow:'linebreak' },
-          tableWidth: 166, margin: { left:8, right:8 },
+          // A4 usable width = 210 - 14 - 14 = 182mm. Columns sum = 182.
+          columnStyles: {
+            0: { cellWidth: 36, fontStyle: 'bold' },           // Student
+            1: { cellWidth: 24, font: 'courier', fontSize: 8 }, // ID
+            2: { cellWidth: 12, halign: 'center', fontStyle: 'bold' }, // Dept
+            3: { cellWidth: 18, fontSize: 8 },                  // Program
+            4: { cellWidth: 22 },                               // Purpose
+            5: { cellWidth: 26 },                               // Time In
+            6: { cellWidth: 18 },                               // Time Out
+            7: { cellWidth: 10, halign: 'center' },             // Dur
+            8: { cellWidth: 16, halign: 'center', fontStyle: 'bold' }, // Status
+          },
+          styles: { cellPadding: { top: 3, bottom: 3, left: 2.5, right: 2.5 }, overflow: 'linebreak' },
+          tableWidth: 182, margin: { left: 14, right: 14 },
           didParseCell(data) {
             if (data.section !== 'body') return;
-            const row = logs[data.row.index]; if (!row) return;
-            const ci = parseISO(row.checkInTimestamp);
-            if (!row.checkOutTimestamp && isToday(ci)) { data.cell.styles.fillColor = BLU_BG; if (data.column.index===8) data.cell.styles.textColor = BLU_TXT; }
-            else if (row.checkOutTimestamp) { if (data.column.index===8) data.cell.styles.textColor = GRN; }
-            else { data.cell.styles.fillColor = AMB_BG; if (data.column.index===8) data.cell.styles.textColor = AMB_TXT; }
-          },
-        });
-
-        // Denied attempts sub-table
-        if (attempts.length > 0) {
-          const lastY = (pdf as any).lastAutoTable?.finalY ?? 100;
-          pdf.setFontSize(9); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(...RED_MED);
-          pdf.text('B.  Denied Access Attempts', 8, lastY + 8);
-          autoTable(pdf, {
-            startY: lastY + 12,
-            head: [['Student', 'Student ID', 'Dept', 'Program', 'Attempt Time', 'Status']],
-            body: attempts.map(a => [a.studentName||'-', a.studentId||'-', a.deptID||'-', a.program||userProgramMap[a.studentId]||'-', a.timestamp?format(parseISO(a.timestamp),'MMM d, h:mm a'):'-', 'DENIED']),
-            headStyles:  { fillColor: RED_MED, textColor:255, fontStyle:'bold', fontSize:7.5 },
-            bodyStyles:  { fontSize:7, fillColor: RED_BG },
-            showHead: 'everyPage',
-            columnStyles: { 0:{cellWidth:34,fontStyle:'bold'}, 1:{cellWidth:24,font:'courier',fontSize:6.5}, 2:{cellWidth:14,halign:'center',fontStyle:'bold'}, 3:{cellWidth:20,fontSize:6.5}, 4:{cellWidth:36}, 5:{cellWidth:16,halign:'center',fontStyle:'bold'} },
-            styles: { cellPadding:{top:2,bottom:2,left:2,right:2}, overflow:'linebreak' },
-            tableWidth: 144, margin: { left:8, right:8 },
-            didParseCell(data) {
-              if (data.section !== 'body') return;
-              // Pastel pink background on all rows
+            const row = allRowsSorted[data.row.index];
+            if (!row) return;
+            if (row.isBlocked) {
+              // Pastel pink — blocked rows
               data.cell.styles.fillColor = [255, 243, 243] as [number,number,number];
-              // Bold red only on ID (col 1) and Status (col 5)
-              if (data.column.index === 1 || data.column.index === 5) {
+              if (data.column.index === 1 || data.column.index === 8) {
                 data.cell.styles.textColor = RED_TXT;
                 data.cell.styles.fontStyle = 'bold';
               }
-            },
-          });
-        }
+            } else {
+              // Session rows — colour by status
+              if (row.status === 'Active') {
+                data.cell.styles.fillColor = BLU_BG;
+                if (data.column.index === 8) data.cell.styles.textColor = BLU_TXT;
+              } else if (row.status === 'Done') {
+                if (data.column.index === 8) data.cell.styles.textColor = GRN;
+              } else {
+                // No Tap
+                data.cell.styles.fillColor = AMB_BG;
+                if (data.column.index === 8) data.cell.styles.textColor = AMB_TXT;
+              }
+            }
+          },
+        });
         addPageNumbers('Comprehensive Library Operations Report');
       }
 
@@ -1184,8 +1287,11 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
       )}
     <div className="space-y-4" style={{ fontFamily: "'DM Sans',sans-serif" }}>
 
-      {/* ── Filter Card ── */}
-      <div style={card}>
+      {/* ── Top row: Filters (left) + Right column: Top Visitors + AI Insights ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4 items-start">
+
+        {/* ── Filter Card ── */}
+        <div style={card}>
         <button className="w-full flex items-center justify-between p-4 sm:p-5" onClick={() => setFiltersOpen(f => !f)}>
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl text-white" style={{ background: navy }}>
@@ -1289,11 +1395,20 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
                 </Select>
               </div>
 
-              {/* Purpose */}
+              {/* Purpose — disabled in BLOCKED mode (blocked attempts have no purpose data) */}
               <div>
-                <p className="text-slate-400 font-semibold text-xs mb-1.5 uppercase tracking-wide">Purpose</p>
-                <Select value={purposeFilter} onValueChange={setPurposeFilter}>
-                  <SelectTrigger className="h-11 rounded-xl bg-slate-50 border-slate-200 font-semibold text-sm">
+                <p className="text-slate-400 font-semibold text-xs mb-1.5 uppercase tracking-wide">
+                  Purpose
+                  {userStatusFilter === 'blocked' && (
+                    <span className="ml-2 text-red-400 font-bold normal-case tracking-normal">· N/A in Blocked view</span>
+                  )}
+                </p>
+                <Select
+                  value={purposeFilter}
+                  onValueChange={setPurposeFilter}
+                  disabled={userStatusFilter === 'blocked'}
+                >
+                  <SelectTrigger className="h-11 rounded-xl bg-slate-50 border-slate-200 font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
@@ -1400,10 +1515,49 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
         )}
       </div>
 
-      {/* ── AI Summary ── */}
+      {/* ── Right column: Top Visitors only ── */}
+      <div>
+
+      {/* ── Top Visitors ── */}
+        {topVisitors.length > 0 && (
+          <div style={{ ...card, background: 'rgba(255,255,255,0.98)' }} className="overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2.5">
+              <Trophy size={16} style={{ color: 'hsl(43,85%,50%)' }} />
+              <div>
+                <h3 className="font-bold text-slate-900 text-base leading-tight" style={{ fontFamily: "'Playfair Display',serif" }}>
+                  Top Visitors
+                </h3>
+                <p className="text-slate-400 text-xs font-medium mt-0.5">Top 5 · selected period</p>
+              </div>
+            </div>
+            <div className="divide-y divide-slate-50">
+              {topVisitors.map((v, i) => (
+                <div key={i} className="px-4 py-3 flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 text-white"
+                    style={{ background: i === 0 ? 'hsl(43,85%,52%)' : i === 1 ? '#94a3b8' : i === 2 ? '#c8915a' : `${navy}20`, color: i < 3 ? 'white' : navy }}>
+                    {i + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-slate-900 text-sm truncate">{v.name}</p>
+                    <p className="text-slate-400 text-xs font-medium">{v.dept}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="font-bold text-sm" style={{ color: navy }}>{v.visits}×</p>
+                    <p className="text-slate-400 text-xs">
+                      {v.totalMins >= 60 ? `${Math.floor(v.totalMins/60)}h ${v.totalMins%60}m` : `${v.totalMins}m`}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>{/* end right column */}
+      </div>{/* end grid */}
+
+      {/* ── AI Summary — full width, below filters ── */}
       {(aiSummary !== null || isGeneratingAi) && (
         <div style={{ ...card, background: 'rgba(255,255,255,0.98)' }} className="overflow-hidden">
-          {/* Entire header row is clickable to toggle collapse */}
           <button
             className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-slate-50 transition-colors border-b border-slate-100"
             onClick={() => setAiCollapsed(c => !c)}
@@ -1417,7 +1571,6 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
             {aiCollapsed
               ? <ChevronDown size={16} className="text-slate-400 flex-shrink-0" />
               : <ChevronUp   size={16} className="text-slate-400 flex-shrink-0" />}
-            {/* X closes entirely — stopPropagation so it doesn't also toggle */}
             <span
               role="button"
               onClick={e => { e.stopPropagation(); setAiSummary(null); setAiCollapsed(false); }}
@@ -1436,53 +1589,6 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
               ) : (
                 <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-line">{aiSummary}</p>
               )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Top Visitors ── */}
-      {topVisitors.length > 0 && (
-        <div style={{ ...card, background: 'rgba(255,255,255,0.98)' }} className="overflow-hidden">
-          <button className="w-full px-5 py-4 border-b border-slate-100 flex items-center gap-2.5 text-left hover:bg-slate-50/50 transition-colors" onClick={() => setTopVisitorsOpen(o => !o)}>
-            <Trophy size={16} style={{ color: 'hsl(43,85%,50%)' }} />
-            <div>
-              <h3 className="font-bold text-slate-900 text-xl leading-tight" style={{ fontFamily: "'Playfair Display',serif" }}>
-                Top Visitors
-              </h3>
-              {!topVisitorsOpen && (
-                <p className="text-slate-400 text-xs font-medium mt-0.5">Click to expand visitor rankings</p>
-              )}
-            </div>
-            <span className="ml-auto text-slate-400 text-sm mr-2">{topVisitorsOpen ? 'selected period' : `${topVisitors.length} visitors ranked`}</span>
-            {topVisitorsOpen ? <ChevronUp size={15} className="text-slate-400" /> : <ChevronDown size={15} className="text-slate-400" />}
-          </button>
-          {topVisitorsOpen && (
-            <div className="divide-y divide-slate-50">
-              {topVisitors.map((v, i) => (
-                <div key={i} className="px-5 py-3.5 flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 text-white"
-                    style={{ background: i === 0 ? 'hsl(43,85%,52%)' : i === 1 ? '#94a3b8' : i === 2 ? '#c8915a' : `${navy}15`, color: i < 3 ? 'white' : navy }}>
-                    {i + 1}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-slate-900 text-sm truncate">{v.name}</p>
-                    <p className="text-slate-400 text-xs font-medium">{v.dept}</p>
-                  </div>
-                  <div className="flex items-center gap-5 flex-shrink-0">
-                    <div className="text-right">
-                      <p className="font-bold text-sm" style={{ color: navy }}>{v.visits}</p>
-                      <p className="text-slate-400 font-semibold text-xs uppercase tracking-wide">visits</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold text-sm text-slate-700">
-                        {v.totalMins >= 60 ? `${Math.floor(v.totalMins / 60)}h` : `${v.totalMins}m`}
-                      </p>
-                      <p className="text-slate-400 font-semibold text-xs uppercase tracking-wide">time</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
             </div>
           )}
         </div>
@@ -1566,11 +1672,11 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
                 {userStatusFilter === 'blocked' ? 'Blocked Users' : 'Active Users Only'}
               </span>
             )}
-            {isFiltersDirty && (
-              <button onClick={handleResetFilters}
+            {isSortDirty && (
+              <button onClick={handleResetSort}
                 className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full transition-all active:scale-95 ml-auto"
-                style={{ background: 'rgba(220,38,38,0.07)', color: '#dc2626', border: '1px solid rgba(220,38,38,0.18)' }}>
-                <RotateCcw size={10} /> Reset
+                style={{ background: 'rgba(100,116,139,0.07)', color: '#475569', border: '1px solid rgba(100,116,139,0.2)' }}>
+                <RotateCcw size={10} /> Reset Sort
               </button>
             )}
           </div>
@@ -1586,23 +1692,84 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="h-11 border-slate-100">
-                  <TableHead className="pl-5 text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('studentName')}>Student <ArchiveSortIcon field="studentName" /></TableHead>
-                  <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 hidden sm:table-cell cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('studentId')}>Student ID <ArchiveSortIcon field="studentId" /></TableHead>
-                  <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('deptID')}>Dept <ArchiveSortIcon field="deptID" /></TableHead>
-                  <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 hidden lg:table-cell cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('program')}>Program <ArchiveSortIcon field="program" /></TableHead>
-                  <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 hidden sm:table-cell cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('purpose')}>Purpose</TableHead>
-                  <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('checkInTimestamp')}>Time In <ArchiveSortIcon field="checkInTimestamp" /></TableHead>
-                  <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 hidden md:table-cell">Time Out</TableHead>
-                  <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 text-center hidden md:table-cell cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('duration')}>Duration <ArchiveSortIcon field="duration" /></TableHead>
-                  <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 text-right pr-5">Status</TableHead>
-                </TableRow>
+                {userStatusFilter === 'blocked' ? (
+                  /* BLOCKED schema: Student | Student ID | Department | Program | Timestamp | Status */
+                  <TableRow className="h-11 border-slate-100">
+                    <TableHead className="pl-5 text-xs font-bold uppercase tracking-wide bg-red-50 text-red-700 cursor-pointer hover:bg-red-100 select-none" onClick={() => toggleArchiveSort('studentName')}>Student <ArchiveSortIcon field="studentName" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide bg-red-50 text-red-700 hidden sm:table-cell cursor-pointer hover:bg-red-100 select-none" onClick={() => toggleArchiveSort('studentId')}>Student ID <ArchiveSortIcon field="studentId" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide bg-red-50 text-red-700 cursor-pointer hover:bg-red-100 select-none" onClick={() => toggleArchiveSort('deptID')}>Department <ArchiveSortIcon field="deptID" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide bg-red-50 text-red-700 hidden lg:table-cell cursor-pointer hover:bg-red-100 select-none" onClick={() => toggleArchiveSort('program')}>Program <ArchiveSortIcon field="program" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide bg-red-50 text-red-700 cursor-pointer hover:bg-red-100 select-none" onClick={() => toggleArchiveSort('checkInTimestamp')}>Timestamp <ArchiveSortIcon field="checkInTimestamp" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide bg-red-50 text-red-700 text-right pr-5">Status</TableHead>
+                  </TableRow>
+                ) : (
+                  /* ACTIVE / ALL schema: Student | ID | Dept | Program | Purpose | Time In | Time Out | Duration | Status */
+                  <TableRow className="h-11 border-slate-100">
+                    <TableHead className="pl-5 text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('studentName')}>Student <ArchiveSortIcon field="studentName" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 hidden sm:table-cell cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('studentId')}>Student ID <ArchiveSortIcon field="studentId" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('deptID')}>Dept <ArchiveSortIcon field="deptID" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 hidden lg:table-cell cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('program')}>Program <ArchiveSortIcon field="program" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 hidden sm:table-cell cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('purpose')}>Purpose</TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('checkInTimestamp')}>Time In <ArchiveSortIcon field="checkInTimestamp" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 hidden md:table-cell">Time Out</TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 text-center hidden md:table-cell cursor-pointer hover:bg-slate-100 select-none" onClick={() => toggleArchiveSort('duration')}>Duration <ArchiveSortIcon field="duration" /></TableHead>
+                    <TableHead className="text-xs font-bold uppercase tracking-wide text-slate-500 bg-slate-50/80 text-right pr-5">Status</TableHead>
+                  </TableRow>
+                )}
               </TableHeader>
               <TableBody>
                 {paginatedRows.map((row, idx) => {
                   if (row._type === 'blocked') {
                     const a = row.data;
                     const prog = a.program || userProgramMap[a.studentId] || '';
+
+                    if (userStatusFilter === 'blocked') {
+                      /* ── BLOCKED view: 6-column legacy schema ── */
+                      return (
+                        <TableRow key={a.id || `b-${idx}`}
+                          className="border-b border-red-50 transition-colors"
+                          style={{ background: 'rgba(255,241,241,0.7)', height: '60px' }}>
+                          {/* Student */}
+                          <TableCell className="pl-5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs text-white flex-shrink-0 bg-red-400">
+                                {(a.studentName||'?')[0].toUpperCase()}
+                              </div>
+                              <span className="font-semibold text-red-800 text-sm">{a.studentName||'—'}</span>
+                            </div>
+                          </TableCell>
+                          {/* Student ID */}
+                          <TableCell className="hidden sm:table-cell">
+                            <span className="font-mono text-xs font-bold px-2 py-1 rounded-lg bg-red-100 text-red-700">{a.studentId||'—'}</span>
+                          </TableCell>
+                          {/* Department */}
+                          <TableCell>
+                            <span className="font-bold text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap bg-red-100 text-red-700 font-mono">{a.deptID||'—'}</span>
+                          </TableCell>
+                          {/* Program */}
+                          <TableCell className="hidden lg:table-cell">
+                            {prog
+                              ? <span className="text-xs font-bold px-2.5 py-1.5 rounded-lg whitespace-nowrap"
+                                  style={{ background: 'hsl(262,83%,58%,0.08)', color: 'hsl(262,83%,45%)', fontFamily: "'DM Mono',monospace" }}>{prog}</span>
+                              : <span className="text-red-300 text-xs">—</span>}
+                          </TableCell>
+                          {/* Timestamp */}
+                          <TableCell>
+                            <div>
+                              <p className="text-sm font-medium text-red-700">{a.timestamp ? format(parseISO(a.timestamp),'h:mm a') : '—'}</p>
+                              <p className="text-xs text-red-400 font-medium">{a.timestamp ? format(parseISO(a.timestamp),'MMM d, yyyy') : ''}</p>
+                            </div>
+                          </TableCell>
+                          {/* Status */}
+                          <TableCell className="text-right pr-5">
+                            <span className="text-xs font-extrabold px-2.5 py-1.5 rounded-full text-red-700 border border-red-200 tracking-wide"
+                              style={{ background: 'rgba(254,226,226,0.8)' }}>BLOCKED</span>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }
+
+                    /* ── ALL view: 9-column extended schema, blocked row with dashes ── */
                     return (
                       <TableRow key={a.id || `b-${idx}`}
                         className="border-b border-red-50 transition-colors"
@@ -1626,9 +1793,7 @@ export function ReportModule({ isSuperAdmin }: ReportModuleProps) {
                             style={{ background: 'hsl(262,83%,58%,0.08)', color: 'hsl(262,83%,45%)', fontFamily: "'DM Mono',monospace" }}>{prog}</span>
                           : <span className="text-slate-300 text-xs">—</span>}
                         </TableCell>
-                        <TableCell className="hidden sm:table-cell">
-                          <span className="text-xs text-slate-400 italic">—</span>
-                        </TableCell>
+                        <TableCell className="hidden sm:table-cell"><span className="text-xs text-slate-400 italic">—</span></TableCell>
                         <TableCell>
                           <div>
                             <p className="text-sm font-medium text-slate-700">{a.timestamp ? format(parseISO(a.timestamp),'h:mm a') : '—'}</p>

@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { X, FileEdit, IdCard, GraduationCap, User, ChevronRight, Loader2, ShieldCheck } from 'lucide-react';
+import { X, FileEdit, IdCard, GraduationCap, User, ChevronRight, Loader2, ShieldCheck, ShieldOff } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, addDoc, query, where, doc, setDoc, getDocs, limit } from 'firebase/firestore';
+import { collection, addDoc, query, where, doc, setDoc } from 'firebase/firestore';
 import { credentialRequestId } from '@/lib/firestore-ids';
 import { UserRecord, DEPARTMENTS, ProgramRecord } from '@/lib/firebase-schema';
 import { formatStudentId } from '@/lib/student-id-formatter';
@@ -18,7 +18,7 @@ interface Props {
   onClose: () => void;
 }
 
-type RequestType = 'name' | 'student_id' | 'dept_program' | 'admin_privilege' | null;
+type RequestType = 'name' | 'student_id' | 'dept_program' | 'admin_privilege' | 'unblock_request' | null;
 
 const navy = 'hsl(221,72%,22%)';
 
@@ -46,6 +46,9 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
   const [newDept,     setNewDept]     = useState(profile.deptID  || '');
   const [newProgram,  setNewProgram]  = useState(profile.program || '');
   const [deptReason,  setDeptReason]  = useState('');
+
+  // Unblock request fields
+  const [unblockReason, setUnblockReason] = useState('');
 
   // Programs for selected dept
   const programsQ = useMemoFirebase(
@@ -84,20 +87,12 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
           requested: { firstName: newFirst.trim(), middleName: newMiddle.trim(), lastName: newLast.trim() },
           current:   { firstName: profile.firstName, middleName: profile.middleName || '', lastName: profile.lastName },
           reason:    nameReason.trim(),
+          requiresVerification: true,
+          verified: false,
         });
       } else if (type === 'student_id') {
         if (!newId.trim() || !/^\d{2}-\d{5}-\d{3}$/.test(newId.trim())) {
           toast({ title: 'Invalid format', description: 'Format: YY-XXXXX-ZZZ', variant: 'destructive' });
-          setSubmitting(false); return;
-        }
-        if (newId.trim() === profile.id) {
-          toast({ title: 'Same as current ID', description: 'The new Student ID must be different from your current one.', variant: 'destructive' });
-          setSubmitting(false); return;
-        }
-        // Check if the requested ID already belongs to another user
-        const idExists = await getDocs(query(collection(db, 'users'), where('id', '==', newId.trim()), limit(1)));
-        if (!idExists.empty) {
-          toast({ title: 'Student ID already registered', description: 'This Student ID is already associated with another account. Please check your ID and try again.', variant: 'destructive' });
           setSubmitting(false); return;
         }
         if (!idReason.trim()) { toast({ title: 'Reason is required', variant: 'destructive' }); setSubmitting(false); return; }
@@ -131,6 +126,18 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
           requested: { role: 'admin' },
           current:   { role: profile.role },
           reason,
+          requiresVerification: true,
+          verified: false,
+        });
+      } else if (type === 'unblock_request') {
+        if (!unblockReason.trim()) { toast({ title: 'Reason is required', variant: 'destructive' }); setSubmitting(false); return; }
+        const credDocId = credentialRequestId();
+        await setDoc(doc(db, 'credential_requests', credDocId), {
+          ...base,
+          type: 'unblock_request',
+          requested: { status: 'active' },
+          current:   { status: profile.status },
+          reason:    unblockReason.trim(),
         });
       }
       setSubmittedType(type);
@@ -150,7 +157,7 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
           description={
             submittedType === 'admin_privilege'
               ? 'Your admin privilege request has been sent. Any active admin can review and approve it in the dashboard.'
-              : 'Your request has been sent to the administrator for review. You will be notified once it has been processed.'
+              : 'Your request has been sent to the administrator for review. You go to Library Admin Office.'
           }
           onClose={onClose}
         />
@@ -185,25 +192,58 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
           {!type && (
             <div className="space-y-3">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Select the type of request</p>
+              {/* Blocked account banner — shown to blocked users only */}
+              {profile.status === 'blocked' && (
+                <div className="flex items-start gap-2.5 p-3 rounded-xl text-xs font-medium"
+                  style={{ background: 'rgba(254,242,242,0.8)', border: '1px solid rgba(220,38,38,0.2)', color: '#991b1b' }}>
+                  <span className="text-base leading-none mt-0.5">🚫</span>
+                  <div>
+                    <p className="font-bold">Your account is currently blocked.</p>
+                    <p className="mt-0.5 text-red-600">Only <strong>Request Unblock</strong> is available. Other requests are locked until your account is restored.</p>
+                  </div>
+                </div>
+              )}
               {([
-                { id: 'name',            icon: User,         label: 'Name Change',              desc: 'First, middle, or last name' },
-                { id: 'student_id',      icon: IdCard,       label: 'Student ID Change',        desc: 'Requires physical verification at Admin Office' },
-                { id: 'dept_program',    icon: GraduationCap,label: 'Department / Program',     desc: 'Requires physical verification at Admin Office' },
-                { id: 'admin_privilege', icon: ShieldCheck,  label: 'Request Admin Privilege',  desc: 'Apply to become a library admin' },
-              ] as const).map(opt => (
-                <button key={opt.id} onClick={() => setType(opt.id)}
-                  className="w-full flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all hover:border-blue-200 hover:bg-blue-50/30 active:scale-[0.99]"
-                  style={{ borderColor: '#e2e8f0' }}>
-                  <div className="p-2.5 rounded-xl flex-shrink-0" style={{ background: `${navy}0d`, color: navy }}>
-                    <opt.icon size={18} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-slate-900 text-sm">{opt.label}</p>
-                    <p className="text-xs text-slate-400 font-medium mt-0.5">{opt.desc}</p>
-                  </div>
-                  <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
-                </button>
-              ))}
+                { id: 'name',            icon: User,         label: 'Name Change',              desc: 'First, middle, or last name',                      blockedOnly: false },
+                { id: 'student_id',      icon: IdCard,       label: 'Student ID Change',        desc: 'Requires physical verification at Admin Office',    blockedOnly: false },
+                { id: 'dept_program',    icon: GraduationCap,label: 'Department / Program',     desc: 'Requires physical verification at Admin Office',    blockedOnly: false },
+                { id: 'admin_privilege', icon: ShieldCheck,  label: 'Request Admin Privilege',  desc: 'Apply to become a library admin',                   blockedOnly: false },
+                { id: 'unblock_request', icon: ShieldOff,    label: 'Request Unblock',          desc: 'Ask admin to restore your library access',          blockedOnly: true  },
+              ] as const).map(opt => {
+                const isBlocked = profile.status === 'blocked';
+                // Blocked users can ONLY access unblock_request — all others are locked
+                // Active users cannot access unblock_request (nothing to unblock)
+                const isAccessible = isBlocked ? opt.id === 'unblock_request' : !opt.blockedOnly;
+                const isUnblockBtn = opt.id === 'unblock_request';
+                return (
+                  <button key={opt.id}
+                    onClick={() => isAccessible ? setType(opt.id) : undefined}
+                    disabled={!isAccessible}
+                    className="w-full flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all"
+                    style={{
+                      borderColor: isUnblockBtn && isBlocked ? 'rgba(220,38,38,0.3)' : '#e2e8f0',
+                      background:  isUnblockBtn && isBlocked ? 'rgba(254,242,242,0.5)' : undefined,
+                      opacity:     !isAccessible ? 0.35 : 1,
+                      cursor:      !isAccessible ? 'not-allowed' : 'pointer',
+                    }}>
+                    <div className="p-2.5 rounded-xl flex-shrink-0"
+                      style={{
+                        background: isUnblockBtn && isBlocked ? 'rgba(220,38,38,0.1)' : `${navy}0d`,
+                        color:      isUnblockBtn && isBlocked ? '#dc2626' : navy,
+                      }}>
+                      <opt.icon size={18} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-slate-900 text-sm">{opt.label}</p>
+                      <p className="text-xs font-medium mt-0.5"
+                        style={{ color: isUnblockBtn && isBlocked ? '#ef4444' : '#94a3b8' }}>
+                        {isBlocked && !isUnblockBtn ? 'Unavailable while account is blocked' : opt.desc}
+                      </p>
+                    </div>
+                    {isAccessible && <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />}
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -214,6 +254,11 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
                 ← Back
               </button>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Name Change Request</p>
+
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-medium text-amber-700 space-y-1">
+                <p className="font-bold">⚠ High-Security Request</p>
+                <p>Bring your credentials (e.g. ID, COM). Visit the <strong>Library Admin Office</strong> for physical verification before this change can be approved.</p>
+              </div>
 
               <div className="p-3 rounded-xl text-xs font-medium text-slate-500 bg-slate-50 border border-slate-100">
                 Current: <span className="font-bold text-slate-800">{profile.firstName} {profile.middleName} {profile.lastName}</span>
@@ -259,7 +304,7 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
 
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-1">New Student ID <span className="text-red-400">*</span></label>
-                <Input value={newId} onChange={e => handleIdChange(e.target.value)} placeholder="YY-XXXXX-ZZZ"
+                <Input value={newId} onChange={e => handleIdChange(e.target.value)} placeholder="XX-YYYYY-ZZZ"
                   className="h-10 rounded-xl bg-slate-50 border-slate-200 text-sm font-mono" />
               </div>
               <div>
@@ -337,9 +382,9 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
               <button onClick={() => setType(null)} className="text-xs font-semibold text-slate-400 hover:text-slate-600 flex items-center gap-1">← Back</button>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Request Admin Privilege</p>
 
-              <div className="p-3 rounded-xl text-xs font-medium text-slate-500 bg-slate-50 border border-slate-100 space-y-1">
-                <p className="font-bold text-slate-700">What happens next?</p>
-                <p>Any active Admin or Super Admin can review and approve this request in the <strong>Requests</strong> tab of the dashboard.</p>
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-medium text-amber-700 space-y-1">
+                <p className="font-bold">⚠ High-Security Request</p>
+                <p>Bring your credentials (e.g. ID, COM). Visit the <strong>Library Admin Office</strong> for physical verification before this change can be approved.</p>
               </div>
 
               <div className="space-y-2">
@@ -371,6 +416,42 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
               </div>
             </div>
           )}
+
+          {/* Unblock request form — only reachable when profile.status === 'blocked' */}
+          {type === 'unblock_request' && (
+            <div className="space-y-4">
+              <button onClick={() => setType(null)} className="text-xs font-semibold text-slate-400 hover:text-slate-600 flex items-center gap-1">← Back</button>
+              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: '#dc2626' }}>Request Account Unblock</p>
+
+              {/* Info banner */}
+              <div className="p-3 rounded-xl text-xs font-medium border space-y-1.5"
+                style={{ background: 'rgba(254,242,242,0.6)', borderColor: 'rgba(220,38,38,0.2)', color: '#991b1b' }}>
+                <p className="font-bold">Your account is currently blocked.</p>
+                <p>Submitting this request will notify the Library Admin. They can review and unblock your account directly from the Requests tab in the dashboard.</p>
+              </div>
+
+              {/* Account info — auto-pulled from profile, read-only */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 space-y-1 text-xs">
+                <p className="font-bold text-slate-600 uppercase tracking-wide text-[10px]">Account being unblocked</p>
+                <p className="font-semibold text-slate-800">{profile.firstName} {profile.lastName}</p>
+                <p className="font-mono text-slate-500">{profile.id}  ·  {profile.email}</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block">
+                  Reason for unblock request <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  value={unblockReason}
+                  onChange={e => setUnblockReason(e.target.value)}
+                  rows={3}
+                  placeholder="Explain why you believe your account should be unblocked…"
+                  className="w-full px-3 py-2.5 rounded-xl border text-sm font-medium resize-none outline-none"
+                  style={{ borderColor: 'rgba(220,38,38,0.3)', background: '#fff', lineHeight: '1.6' }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -382,8 +463,8 @@ export function CredentialRequestModal({ profile, onClose }: Props) {
           {type && (
             <button onClick={handleSubmit} disabled={submitting}
               className="flex-1 h-11 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-60"
-              style={{ background: navy }}>
-              {submitting ? <><Loader2 size={15} className="animate-spin" /> Submitting…</> : 'Submit Request'}
+              style={{ background: type === 'unblock_request' ? '#dc2626' : navy }}>
+              {submitting ? <><Loader2 size={15} className="animate-spin" /> Submitting…</> : type === 'unblock_request' ? 'Send Unblock Request' : 'Submit Request'}
             </button>
           )}
         </div>

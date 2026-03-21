@@ -3,14 +3,13 @@
 import { useState, useMemo } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Clock, CheckCircle, Edit3, Trash2, Loader2, ShieldAlert, GraduationCap, Building2, Search, RotateCcw } from 'lucide-react';
+import { Clock, CheckCircle, Edit3, Trash2, Loader2, ShieldAlert, GraduationCap, Building2, Search, RotateCcw, Bug } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useFirestore, useCollection, useMemoFirebase, deleteDocumentNonBlocking, updateDocumentNonBlocking } from '@/firebase';
-import { collection, doc, query, where, getDocs, setDoc } from 'firebase/firestore';
+import { useFirestore, useCollection, useMemoFirebase, deleteDocumentNonBlocking, updateDocumentNonBlocking, useUser } from '@/firebase';
+import { collection, doc, query, where, getDocs, setDoc, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import { UserRecord, DepartmentRecord, ProgramRecord, formatFullName } from '@/lib/firebase-schema';
 import { format } from 'date-fns';
 import { SuccessCard } from '@/components/ui/SuccessCard';
@@ -41,6 +40,7 @@ export function TemporaryVisitorManagement({ isSuperAdmin }: Props) {
 
   const { toast } = useToast();
   const db = useFirestore();
+  const { user } = useUser();
 
   const deptRef     = useMemoFirebase(() => collection(db, 'departments'), [db]);
   const { data: dbDepartments } = useCollection<DepartmentRecord>(deptRef);
@@ -80,7 +80,6 @@ export function TemporaryVisitorManagement({ isSuperAdmin }: Props) {
 
   const filtered = useMemo(() => {
     let list = (visitors || []);
-    // Search
     if (search.trim()) {
       const s = search.toLowerCase();
       list = list.filter(v =>
@@ -90,11 +89,8 @@ export function TemporaryVisitorManagement({ isSuperAdmin }: Props) {
         (v.deptID || '').toLowerCase().includes(s)
       );
     }
-    // Dept filter
     if (deptFilter !== 'all') list = list.filter(v => v.deptID === deptFilter);
-    // Program filter
     if (programFilter !== 'all') list = list.filter(v => v.program === programFilter);
-    // Sort
     list = [...list].sort((a, b) => {
       let va = '', vb = '';
       if (sortField === 'name') { va = `${a.lastName}${a.firstName}`; vb = `${b.lastName}${b.firstName}`; }
@@ -116,12 +112,80 @@ export function TemporaryVisitorManagement({ isSuperAdmin }: Props) {
     setIsEditOpen(true);
   };
 
+  // Helper: force checkout all active sessions for a given student ID
+  const forceCheckoutActiveSessions = async (studentId: string) => {
+    console.log('=== FORCE CHECKOUT DEBUG ===');
+    console.log('Student ID:', studentId);
+    console.log('Admin user email:', user?.email);
+    
+    try {
+      const possibleIds = [
+        studentId,
+        studentId.replace(/-/g, ''),
+        studentId.split('-')[0] + studentId.split('-')[1] + studentId.split('-')[2],
+        studentId.split('-')[0] + '-' + studentId.split('-')[1] + studentId.split('-')[2],
+      ];
+      
+      let foundSessions = false;
+      
+      for (const idFormat of possibleIds) {
+        console.log(`🔍 Trying ID format: "${idFormat}"`);
+        
+        const allLogsQuery = query(
+          collection(db, 'library_logs'),
+          where('studentId', '==', idFormat)
+        );
+        const allLogsSnap = await getDocs(allLogsQuery);
+        console.log(`   Found ${allLogsSnap.size} total logs`);
+        
+        const activeLogs = allLogsSnap.docs.filter(doc => {
+          const data = doc.data();
+          const isActive = !data.checkOutTimestamp || data.checkOutTimestamp === '';
+          if (isActive) {
+            console.log(`   Active session found: ${doc.id}, checkOutTimestamp: ${data.checkOutTimestamp}`);
+          }
+          return isActive;
+        });
+        
+        console.log(`   Active sessions: ${activeLogs.length}`);
+        
+        if (activeLogs.length > 0) {
+          console.log(`✅ Found ${activeLogs.length} active sessions with ID format: ${idFormat}`);
+          const now = new Date().toISOString();
+          for (const logDoc of activeLogs) {
+            const logData = logDoc.data();
+            console.log(`   Updating session: ${logDoc.id}`);
+            console.log(`   Checked in at: ${logData.checkInTimestamp}`);
+            console.log(`   Current checkOutTimestamp: ${logData.checkOutTimestamp || 'NULL/EMPTY'}`);
+            console.log(`   Setting checkout to: ${now}`);
+            
+            await updateDocumentNonBlocking(doc(db, 'library_logs', logDoc.id), {
+              checkOutTimestamp: now,
+            });
+            console.log(`   ✅ Updated ${logDoc.id}`);
+          }
+          foundSessions = true;
+          break;
+        }
+      }
+      
+      if (!foundSessions) {
+        console.log('❌ No active sessions found for any ID format');
+      }
+      
+    } catch (error) {
+      console.error('❌ Force checkout error:', error);
+    }
+    console.log('=== END DEBUG ===\n');
+  };
+
+  // ── PROMOTE (Approve) visitor to student ───────────────────────────────────
+  // NOTE: Promoting should NOT terminate active sessions.
   const handleApprove = async (v: UserRecord) => {
     if (!v.deptID) {
       toast({ title: 'Assign Department First', description: 'Edit the record and assign a college.', variant: 'destructive' });
       openEdit(v); return;
     }
-    // v.id IS the student's real entered ID (no TEMP- should reach here)
     if (!v.id || v.id.startsWith('TEMP-') || !/^\d{2}-\d{5}-\d{3}$/.test(v.id)) {
       toast({
         title: 'Student ID Missing',
@@ -133,7 +197,10 @@ export function TemporaryVisitorManagement({ isSuperAdmin }: Props) {
 
     setIsApproving(v.id);
     try {
-      // Promote in place — just update role and status
+      // ✅ PROMOTE: DO NOT force checkout — user should stay checked in
+      // No call to forceCheckoutActiveSessions here
+
+      // Promote in place — update role and status
       await setDoc(doc(db, 'users', v.id), {
         ...v,
         role:   'student',
@@ -142,7 +209,7 @@ export function TemporaryVisitorManagement({ isSuperAdmin }: Props) {
 
       // Update any existing logs that used this student ID
       const logSnap = await getDocs(query(collection(db, 'library_logs'), where('studentId', '==', v.id)));
-      logSnap.forEach(logDoc => {
+      logSnap.forEach((logDoc: QueryDocumentSnapshot<DocumentData>) => {
         updateDocumentNonBlocking(doc(db, 'library_logs', logDoc.id), {
           deptID:      v.deptID,
           studentName: `${(v.lastName || '').toUpperCase()}, ${v.firstName}`,
@@ -161,6 +228,7 @@ export function TemporaryVisitorManagement({ isSuperAdmin }: Props) {
     }
   };
 
+  // ── SAVE edits (just updating metadata) ──────────────────────────────────
   const saveEdits = () => {
     if (!editingVisitor) return;
     updateDocumentNonBlocking(doc(db, 'users', editingVisitor.id), {
@@ -174,8 +242,12 @@ export function TemporaryVisitorManagement({ isSuperAdmin }: Props) {
     setSuccessCard({ title: 'Record Updated', description: 'The visitor profile has been saved successfully.', color: 'navy' });
   };
 
-  const confirmDelete = () => {
+  // ── DELETE visitor ─────────────────────────────────────────────────────────
+  // NOTE: Deleting a user should terminate any active sessions.
+  const confirmDelete = async () => {
     if (!visitorToDelete) return;
+    // ✅ DELETE: Force checkout before deleting user
+    await forceCheckoutActiveSessions(visitorToDelete.id);
     deleteDocumentNonBlocking(doc(db, 'users', visitorToDelete.id));
     setSuccessCard({ title: 'Visitor Removed', description: 'The pending visitor record has been deleted.', color: 'amber' });
     setIsDeleteOpen(false);

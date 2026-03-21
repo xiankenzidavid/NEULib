@@ -34,6 +34,8 @@ export function CurrentVisitors() {
 
   const [sortField, setSortField] = useState<'studentName' | 'studentId' | 'deptID' | 'purpose' | 'checkInTimestamp' | 'duration'>('checkInTimestamp');
   const [sortDir,   setSortDir]   = useState<'asc' | 'desc'>('desc');
+  const [cvRpp,  setCvRpp]  = useState<number>(25);
+  const [cvPage, setCvPage] = useState(1);
 
   const toggleSort = (field: typeof sortField) => {
     if (sortField !== field) { setSortField(field); setSortDir('asc'); return; }
@@ -328,7 +330,7 @@ export function CurrentVisitors() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sortedLogs.map(log => {
+                {sortedLogs.slice((cvPage-1)*cvRpp, cvPage*cvRpp).map(log => {
                   const isInside = !log.checkOutTimestamp;
                   const dur = formatDur(log.checkInTimestamp, log.checkOutTimestamp);
                   return (
@@ -399,6 +401,46 @@ export function CurrentVisitors() {
             </Table>
           </div>
         )}
+          {(() => {
+            const _tot = sortedLogs.length;
+            const _pg  = Math.ceil(_tot / cvRpp);
+            if (_tot === 0) return null;
+            return (
+              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs font-medium text-slate-400">
+                    {(cvPage-1)*cvRpp+1}&ndash;{Math.min(cvPage*cvRpp,_tot)} of {_tot}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">Rows per page:</span>
+                    <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100">
+                      {([25,50,100] as const).map(n=>(
+                        <button key={n} onClick={()=>{ setCvRpp(n); setCvPage(1); }}
+                          className="px-2.5 py-1 rounded-md text-xs font-bold transition-all"
+                          style={cvRpp===n?{background:'hsl(43,85%,50%)',color:'white'}:{color:'#64748b'}}>{n}</button>
+                      ))}
+                      <button onClick={()=>{const v=parseInt(prompt('Rows per page (10-500):',String(cvRpp))||String(cvRpp));if(!isNaN(v)&&v>=10&&v<=500){ setCvRpp(v); setCvPage(1);}}}
+                        className="px-2.5 py-1 rounded-md text-xs font-bold text-slate-500 hover:bg-white transition-all">Custom</button>
+                    </div>
+                  </div>
+                </div>
+                {_pg>1&&(
+                  <div className="flex items-center gap-1">
+                    <button onClick={()=>{ setCvPage(1); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={cvPage===1} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#171;&#171;</button>
+                    <button onClick={()=>{ setCvPage((p:number)=>Math.max(1,p-1)); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={cvPage===1} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#8249;</button>
+                    {Array.from({length:_pg},(_,i)=>i+1)
+                      .filter(p=>p===1||p===_pg||Math.abs(p-cvPage)<=1)
+                      .reduce<(number|string)[]>((acc,p,i,a)=>{if(i>0&&(p as number)-(a[i-1] as number)>1)acc.push('...');acc.push(p);return acc;},[])
+                      .map((p,i)=>p==='...'?<span key={'e'+i} className="px-1 text-slate-400 text-xs">&#8230;</span>
+                        :<button key={p} onClick={()=>{ setCvPage(p as number); window.scrollTo({top:0,behavior:'smooth'}); }} className="h-7 w-7 rounded-lg text-xs font-bold border transition-all"
+                           style={cvPage===p?{background:'hsl(43,85%,50%)',color:'white',border:'none'}:{borderColor:'#e2e8f0',color:'#64748b'}}>{p}</button>)}
+                    <button onClick={()=>{ setCvPage((p:number)=>Math.min(_pg,p+1)); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={cvPage===_pg} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#8250;</button>
+                    <button onClick={()=>{ setCvPage(_pg); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={cvPage===_pg} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#187;&#187;</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
       </div>
     </div>
   );

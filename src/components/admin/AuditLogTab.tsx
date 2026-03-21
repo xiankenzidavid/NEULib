@@ -84,12 +84,12 @@ export function AuditLogTab() {
   const db = useFirestore();
 
   const [search,       setSearch]       = useState('');
+  const [alRpp,  setAlRpp]  = useState<number>(25);
+  const [alPage, setAlPage] = useState(1);
   const [category,     setCategory]     = useState('all');
   const [sortField,    setSortField]    = useState<SortField>('timestamp');
   const [sortDir,      setSortDir]      = useState<'asc' | 'desc'>('desc');
   const [expandedLog,  setExpandedLog]  = useState<AuditLogRecord | null>(null);
-
-  const isFiltersDirty = search !== '' || category !== 'all' || sortField !== 'timestamp' || sortDir !== 'desc';
 
   const logsQuery = useMemoFirebase(
     () => query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(500)),
@@ -124,13 +124,6 @@ export function AuditLogTab() {
   const handleSort = (f: SortField) => {
     if (sortField === f) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortField(f); setSortDir('desc'); }
-  };
-
-  const handleReset = () => {
-    setSearch('');
-    setCategory('all');
-    setSortField('timestamp');
-    setSortDir('desc');
   };
 
   const SortIcon = ({ field }: { field: SortField }) => {
@@ -193,13 +186,6 @@ export function AuditLogTab() {
 
           <p className="text-slate-400 text-xs font-medium ml-auto">
             {filtered.length} event{filtered.length !== 1 ? 's' : ''}
-            {isFiltersDirty && (
-              <button onClick={handleReset}
-                className="ml-2 flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[10px] font-bold border transition-all active:scale-95 inline-flex"
-                style={{background:'rgba(220,38,38,0.06)',color:'#dc2626',borderColor:'rgba(220,38,38,0.18)'}}>
-                <RotateCcw size={10}/> Reset
-              </button>
-            )}
             {(logs?.length ?? 0) > 500 && <span className="ml-1">(showing latest 500)</span>}
           </p>
         </div>
@@ -247,7 +233,7 @@ export function AuditLogTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map(log => {
+                {filtered.slice((alPage-1)*alRpp, alPage*alRpp).map(log => {
                   const meta = ACTION_META[log.action] ?? {
                     label: log.action, color: '#64748b', icon: ShieldAlert,
                   };
@@ -330,6 +316,48 @@ export function AuditLogTab() {
       </div>
 
       {/* ── Full View Modal ── */}
+
+      {/* ── Pagination ── */}
+      {filtered.length > 0 && (() => {
+        const _tot = filtered.length;
+        const _pg  = Math.ceil(_tot / alRpp);
+        return (
+          <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-xs font-medium text-slate-400">
+                {(alPage-1)*alRpp+1}–{Math.min(alPage*alRpp,_tot)} of {_tot}
+              </span>
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">Rows per page:</span>
+                <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100">
+                  {([25,50,100] as const).map(n=>(
+                    <button key={n} onClick={()=>{ setAlRpp(n); setAlPage(1); }}
+                      className="px-2.5 py-1 rounded-md text-xs font-bold transition-all"
+                      style={alRpp===n?{background:'hsl(43,85%,50%)',color:'white'}:{color:'#64748b'}}>{n}</button>
+                  ))}
+                  <button onClick={()=>{const v=parseInt(prompt('Rows per page (10-500):',String(alRpp))||String(alRpp));if(!isNaN(v)&&v>=10&&v<=500){ setAlRpp(v); setAlPage(1);}}}
+                    className="px-2.5 py-1 rounded-md text-xs font-bold text-slate-500 hover:bg-white transition-all">Custom</button>
+                </div>
+              </div>
+            </div>
+            {_pg>1&&(
+              <div className="flex items-center gap-1">
+                <button onClick={()=>{ setAlPage(1); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={alPage===1} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">««</button>
+                <button onClick={()=>{ setAlPage((p:number)=>Math.max(1,p-1)); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={alPage===1} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">‹</button>
+                {Array.from({length:_pg},(_,i)=>i+1)
+                  .filter(p=>p===1||p===_pg||Math.abs(p-alPage)<=1)
+                  .reduce<(number|string)[]>((acc,p,i,a)=>{if(i>0&&(p as number)-(a[i-1] as number)>1)acc.push('...');acc.push(p);return acc;},[])
+                  .map((p,i)=>p==='...'?<span key={'e'+i} className="px-1 text-slate-400 text-xs">…</span>
+                    :<button key={p} onClick={()=>{ setAlPage(p as number); window.scrollTo({top:0,behavior:'smooth'}); }} className="h-7 w-7 rounded-lg text-xs font-bold border transition-all"
+                       style={alPage===p?{background:'hsl(43,85%,50%)',color:'white',border:'none'}:{borderColor:'#e2e8f0',color:'#64748b'}}>{p}</button>)}
+                <button onClick={()=>setAlPage((p:number)=>Math.min(_pg,p+1))} disabled={alPage===_pg} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">›</button>
+                <button onClick={()=>{ setAlPage(_pg); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={alPage===_pg} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">»»</button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {expandedLog && (
         <AuditFullViewModal log={expandedLog} onClose={() => setExpandedLog(null)} />
       )}

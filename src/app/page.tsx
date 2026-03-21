@@ -462,7 +462,7 @@ export default function Home() {
               <p className="text-sm font-bold text-blue-800">To get access:</p>
               <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside font-medium">
                 <li>Contact an <strong>Admin</strong></li>
-                <li>Ask them to register your email in <strong>Staff Access Registry</strong></li>
+                <li>Request access through the <strong>Staff Access Registry</strong></li>
                 <li>Return and sign in again</li>
               </ol>
             </div>

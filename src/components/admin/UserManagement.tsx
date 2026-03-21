@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFirestore, updateDocumentNonBlocking, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, query, where } from 'firebase/firestore';
+import { collection, doc, query, where, getDocs } from 'firebase/firestore';
 import { UserRecord, DepartmentRecord, ProgramRecord, formatFullName } from '@/lib/firebase-schema';
 import { writeAuditLog } from '@/lib/audit-logger';
 import { ImportStudentDialog } from './ImportStudentDialog';
@@ -189,6 +189,8 @@ export function UserManagement({ isSuperAdmin }: UserManagementProps) {
   const [sortField,     setSortField]     = useState<SortField>('lastName');
   const [sortDir,       setSortDir]       = useState<'asc' | 'desc'>('asc');
   const [isImportOpen,  setIsImportOpen]  = useState(false);
+  const [umRpp,  setUmRpp]  = useState<number>(25);
+  const [umPage, setUmPage] = useState(1);
   const [successCard,   setSuccessCard]   = useState<{ title: string; description: string; color?: 'green' | 'navy' | 'amber' } | null>(null);
   const [profileUser,   setProfileUser]   = useState<UserRecord | null>(null);
 
@@ -287,7 +289,8 @@ export function UserManagement({ isSuperAdmin }: UserManagementProps) {
     });
   }, [students, searchTerm, deptFilter, statusFilter, programFilter, sortField, sortDir, roleFilter, programMap]);
 
-  const toggleBlockStatus = (target: UserRecord) => {
+  // ── Force checkout on block ─────────────────────────────────────────────────
+  const toggleBlockStatus = async (target: UserRecord) => {
     if ((target.role==='admin'||target.role==='super_admin') && currentActorRole==='admin') {
       toast({ title: 'Permission Denied', description: 'Only Super Administrators can block/unblock Admins.', variant: 'destructive' }); return;
     }
@@ -295,7 +298,60 @@ export function UserManagement({ isSuperAdmin }: UserManagementProps) {
       toast({ title: 'Permission Denied', description: 'Cannot modify your own access.', variant: 'destructive' }); return;
     }
     const newStatus = target.status==='blocked' ? 'active' : 'blocked';
-    updateDocumentNonBlocking(doc(db, 'users', target.id), { status: newStatus });
+    await updateDocumentNonBlocking(doc(db, 'users', target.id), { status: newStatus });
+
+    // If we are blocking the user, force checkout any active sessions.
+    // We need to query ALL logs for this student and check for checkOutTimestamp being null/undefined/empty
+    if (newStatus === 'blocked') {
+      try {
+        // Try multiple ID formats to handle any inconsistencies
+        const possibleIds = [
+          target.id,
+          target.id.replace(/-/g, ''),
+          target.id.split('-')[0] + target.id.split('-')[1] + target.id.split('-')[2],
+          target.id.split('-')[0] + '-' + target.id.split('-')[1] + target.id.split('-')[2],
+        ];
+        
+        let foundSessions = false;
+        
+        for (const idFormat of possibleIds) {
+          const allLogsQuery = query(
+            collection(db, 'library_logs'),
+            where('studentId', '==', idFormat)
+          );
+          const allLogsSnap = await getDocs(allLogsQuery);
+          
+          // Filter for active sessions (checkOutTimestamp is falsy)
+          const activeLogs = allLogsSnap.docs.filter(doc => {
+            const data = doc.data();
+            const isActive = !data.checkOutTimestamp || data.checkOutTimestamp === '';
+            return isActive;
+          });
+          
+          if (activeLogs.length > 0) {
+            console.log(`Found ${activeLogs.length} active sessions for ${target.id} (format: ${idFormat})`);
+            const now = new Date().toISOString();
+            for (const logDoc of activeLogs) {
+              await updateDocumentNonBlocking(doc(db, 'library_logs', logDoc.id), {
+                checkOutTimestamp: now,
+                systemNote: 'Force checked out — account blocked by admin',
+              });
+            }
+            foundSessions = true;
+            break;
+          }
+        }
+        
+        if (!foundSessions) {
+          console.log(`No active sessions found for ${target.id}`);
+        }
+        
+      } catch (error) {
+        console.error('Force checkout error:', error);
+        // Non-fatal — blocking still proceeds
+      }
+    }
+
     writeAuditLog(db, user, newStatus==='blocked' ? 'user.block' : 'user.unblock', {
       targetId: target.id, targetName: formatFullName(target), detail: `Library access set to ${newStatus}`,
     });
@@ -476,7 +532,7 @@ export function UserManagement({ isSuperAdmin }: UserManagementProps) {
                     </TableCell></TableRow>
                   ) : processedStudents.length===0 ? (
                     <TableRow><TableCell colSpan={7} className="h-40 text-center text-slate-400 text-sm italic">No matching records.</TableCell></TableRow>
-                  ) : processedStudents.map(s => {
+                  ) : processedStudents.slice((umPage-1)*umRpp, umPage*umRpp).map(s => {
                     const programEntry    = programMap[`${s.deptID}::${s.program}`]||null;
                     const isBlocked       = s.status==='blocked';
                     const isSuperAdminRec = s.role==='super_admin';
@@ -577,6 +633,46 @@ export function UserManagement({ isSuperAdmin }: UserManagementProps) {
           </CardContent>
         </Card>
         <ImportStudentDialog open={isImportOpen} onOpenChange={setIsImportOpen}/>
+        {(() => {
+            const _tot = processedStudents.length;
+            const _pg  = Math.ceil(_tot / umRpp);
+            if (_tot === 0) return null;
+            return (
+              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs font-medium text-slate-400">
+                    {(umPage-1)*umRpp+1}&ndash;{Math.min(umPage*umRpp,_tot)} of {_tot}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">Rows per page:</span>
+                    <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100">
+                      {([25,50,100] as const).map(n=>(
+                        <button key={n} onClick={()=>{ setUmRpp(n); setUmPage(1); }}
+                          className="px-2.5 py-1 rounded-md text-xs font-bold transition-all"
+                          style={umRpp===n?{background:'hsl(43,85%,50%)',color:'white'}:{color:'#64748b'}}>{n}</button>
+                      ))}
+                      <button onClick={()=>{const v=parseInt(prompt('Rows per page (10-500):',String(umRpp))||String(umRpp));if(!isNaN(v)&&v>=10&&v<=500){ setUmRpp(v); setUmPage(1);}}}
+                        className="px-2.5 py-1 rounded-md text-xs font-bold text-slate-500 hover:bg-white transition-all">Custom</button>
+                    </div>
+                  </div>
+                </div>
+                {_pg>1&&(
+                  <div className="flex items-center gap-1">
+                    <button onClick={()=>{ setUmPage(1); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={umPage===1} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#171;&#171;</button>
+                    <button onClick={()=>{ setUmPage((p:number)=>Math.max(1,p-1)); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={umPage===1} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#8249;</button>
+                    {Array.from({length:_pg},(_,i)=>i+1)
+                      .filter(p=>p===1||p===_pg||Math.abs(p-umPage)<=1)
+                      .reduce<(number|string)[]>((acc,p,i,a)=>{if(i>0&&(p as number)-(a[i-1] as number)>1)acc.push('...');acc.push(p);return acc;},[])
+                      .map((p,i)=>p==='...'?<span key={'e'+i} className="px-1 text-slate-400 text-xs">&#8230;</span>
+                        :<button key={p} onClick={()=>{ setUmPage(p as number); window.scrollTo({top:0,behavior:'smooth'}); }} className="h-7 w-7 rounded-lg text-xs font-bold border transition-all"
+                           style={umPage===p?{background:'hsl(43,85%,50%)',color:'white',border:'none'}:{borderColor:'#e2e8f0',color:'#64748b'}}>{p}</button>)}
+                    <button onClick={()=>{ setUmPage((p:number)=>Math.min(_pg,p+1)); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={umPage===_pg} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#8250;</button>
+                    <button onClick={()=>{ setUmPage(_pg); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={umPage===_pg} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#187;&#187;</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
       </div>
     </>
   );

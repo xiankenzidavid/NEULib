@@ -52,6 +52,10 @@ export function LogHistory() {
   const [sortField,     setSortField]     = useState<SortField>('checkInTimestamp');
   const [sortDir,       setSortDir]       = useState<'asc' | 'desc'>('desc');
   const [logView,       setLogView]       = useState<LogView>('sessions');
+  const [lhRpp,  setLhRpp]  = useState<number>(25);
+  const [lhPage, setLhPage] = useState(1);
+  const [lhBRpp, setLhBRpp] = useState<number>(25);
+  const [lhBPage,setLhBPage]= useState(1);
 
   const deptRef = useMemoFirebase(() => collection(db, 'departments'), [db]);
   const { data: depts } = useCollection<DepartmentRecord>(deptRef);
@@ -208,6 +212,7 @@ export function LogHistory() {
         ))}
       </div>
 
+
       {logView === 'blocked' ? (
         /* ── Blocked Attempts View ── */
         <div style={{background:'rgba(255,255,255,0.97)',backdropFilter:'blur(20px)',border:'1px solid rgba(255,255,255,0.9)',boxShadow:'0 4px 20px rgba(10,26,77,0.09)',borderRadius:'1rem'}} className="overflow-hidden">
@@ -233,7 +238,7 @@ export function LogHistory() {
                   </tr>
                 </thead>
                 <tbody>
-                  {blockedAttempts.map((a, i) => (
+                  {(blockedAttempts||[]).slice((lhBPage-1)*lhBRpp, lhBPage*lhBRpp).map((a, i) => (
                     <tr key={a.id || i} className="border-b border-slate-50 transition-colors" style={{background:'rgba(239,68,68,0.03)',height:56}}>
                       <td className="pl-5 py-3">
                         <div className="flex items-center gap-2.5">
@@ -431,7 +436,7 @@ export function LogHistory() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map(l => {
+                {filtered.slice((lhPage-1)*lhRpp, lhPage*lhRpp).map(l => {
                   const ci     = parseISO(l.checkInTimestamp);
                   const noTap  = !l.checkOutTimestamp && !isToday(ci);
                   const active = !l.checkOutTimestamp && isToday(ci);
@@ -516,9 +521,89 @@ export function LogHistory() {
             </Table>
           </div>
         )}
+          {/* ── Sessions pagination ── */}
+          {filtered.length > 0 && (() => {
+            const _tot = filtered.length;
+            const _pg  = Math.ceil(_tot / lhRpp);
+            return (
+              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs font-medium text-slate-400">
+                    {(lhPage-1)*lhRpp+1}–{Math.min(lhPage*lhRpp,_tot)} of {_tot}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">Rows per page:</span>
+                    <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100">
+                      {([25,50,100] as const).map(n=>(
+                        <button key={n} onClick={()=>{ setLhRpp(n); setLhPage(1); }}
+                          className="px-2.5 py-1 rounded-md text-xs font-bold transition-all"
+                          style={lhRpp===n?{background:'hsl(43,85%,50%)',color:'white'}:{color:'#64748b'}}>{n}</button>
+                      ))}
+                      <button onClick={()=>{const v=parseInt(prompt('Rows per page (10-500):',String(lhRpp))||String(lhRpp));if(!isNaN(v)&&v>=10&&v<=500){ setLhRpp(v); setLhPage(1);}}}
+                        className="px-2.5 py-1 rounded-md text-xs font-bold text-slate-500 hover:bg-white transition-all">Custom</button>
+                    </div>
+                  </div>
+                </div>
+                {_pg>1&&(
+                  <div className="flex items-center gap-1">
+                    <button onClick={()=>{setLhPage(1);window.scrollTo({top:0,behavior:"smooth"});}} disabled={lhPage===1} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">««</button>
+                    <button onClick={()=>{setLhPage((p:number)=>Math.max(1,p-1));window.scrollTo({top:0,behavior:"smooth"});}} disabled={lhPage===1} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">‹</button>
+                    {Array.from({length:_pg},(_,i)=>i+1)
+                      .filter(p=>p===1||p===_pg||Math.abs(p-lhPage)<=1)
+                      .reduce<(number|string)[]>((acc,p,i,a)=>{if(i>0&&(p as number)-(a[i-1] as number)>1)acc.push('...');acc.push(p);return acc;},[ ])
+                      .map((p,i)=>p==='...'?<span key={'e'+i} className="px-1 text-slate-400 text-xs">…</span>
+                        :<button key={p} onClick={()=>{setLhPage(p as number);window.scrollTo({top:0,behavior:"smooth"});}} className="h-7 w-7 rounded-lg text-xs font-bold border transition-all"
+                           style={lhPage===p?{background:'hsl(43,85%,50%)',color:'white',border:'none'}:{borderColor:'#e2e8f0',color:'#64748b'}}>{p}</button>)}
+                    <button onClick={()=>{setLhPage((p:number)=>Math.min(_pg,p+1));window.scrollTo({top:0,behavior:"smooth"});}} disabled={lhPage===_pg} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">›</button>
+                    <button onClick={()=>{setLhPage(_pg);window.scrollTo({top:0,behavior:"smooth"});}} disabled={lhPage===_pg} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">»»</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
       </div>
     </>
     )}
+          {(() => {
+            const _tot = (blockedAttempts||[]).length;
+            const _pg  = Math.ceil(_tot / lhBRpp);
+            if (_tot === 0) return null;
+            return (
+              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs font-medium text-slate-400">
+                    {(lhBPage-1)*lhBRpp+1}&ndash;{Math.min(lhBPage*lhBRpp,_tot)} of {_tot}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">Rows per page:</span>
+                    <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100">
+                      {([25,50,100] as const).map(n=>(
+                        <button key={n} onClick={()=>{ setLhBRpp(n); setLhBPage(1); }}
+                          className="px-2.5 py-1 rounded-md text-xs font-bold transition-all"
+                          style={lhBRpp===n?{background:'hsl(43,85%,50%)',color:'white'}:{color:'#64748b'}}>{n}</button>
+                      ))}
+                      <button onClick={()=>{const v=parseInt(prompt('Rows per page (10-500):',String(lhBRpp))||String(lhBRpp));if(!isNaN(v)&&v>=10&&v<=500){ setLhBRpp(v); setLhBPage(1);}}}
+                        className="px-2.5 py-1 rounded-md text-xs font-bold text-slate-500 hover:bg-white transition-all">Custom</button>
+                    </div>
+                  </div>
+                </div>
+                {_pg>1&&(
+                  <div className="flex items-center gap-1">
+                    <button onClick={()=>{ setLhBPage(1); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={lhBPage===1} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#171;&#171;</button>
+                    <button onClick={()=>{ setLhBPage((p:number)=>Math.max(1,p-1)); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={lhBPage===1} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#8249;</button>
+                    {Array.from({length:_pg},(_,i)=>i+1)
+                      .filter(p=>p===1||p===_pg||Math.abs(p-lhBPage)<=1)
+                      .reduce<(number|string)[]>((acc,p,i,a)=>{if(i>0&&(p as number)-(a[i-1] as number)>1)acc.push('...');acc.push(p);return acc;},[])
+                      .map((p,i)=>p==='...'?<span key={'e'+i} className="px-1 text-slate-400 text-xs">&#8230;</span>
+                        :<button key={p} onClick={()=>{ setLhBPage(p as number); window.scrollTo({top:0,behavior:'smooth'}); }} className="h-7 w-7 rounded-lg text-xs font-bold border transition-all"
+                           style={lhBPage===p?{background:'hsl(43,85%,50%)',color:'white',border:'none'}:{borderColor:'#e2e8f0',color:'#64748b'}}>{p}</button>)}
+                    <button onClick={()=>{ setLhBPage((p:number)=>Math.min(_pg,p+1)); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={lhBPage===_pg} className="h-7 px-2.5 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#8250;</button>
+                    <button onClick={()=>{ setLhBPage(_pg); window.scrollTo({top:0,behavior:'smooth'}); }} disabled={lhBPage===_pg} className="h-7 px-2 rounded-lg text-xs font-bold border border-slate-200 disabled:opacity-30 transition-all">&#187;&#187;</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
     </div>
   );
 }

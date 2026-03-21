@@ -88,11 +88,12 @@ service cloud.firestore {
 
     // /blocked_attempts — written by kiosk when a restricted user taps in.
     // Admins/staff can read; any signed-in user (including kiosk session) can create.
-    // No updates or deletes allowed — records are append-only for audit purposes.
+    // Updates restricted to NEU/admin accounts only — needed for studentId cascade
+    // when an ID change request is approved. Records are otherwise append-only.
     match /blocked_attempts/{attemptId} {
       allow read:   if isNEUEmail() || isOwnerEmail();
       allow create: if isSignedIn();
-      allow update: if false;
+      allow update: if isNEUEmail() || isOwnerEmail();
       allow delete: if isOwnerEmail();
     }
 
