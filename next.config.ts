@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'placehold.co',        pathname: '/**' },
       { protocol: 'https', hostname: 'images.unsplash.com', pathname: '/**' },
       { protocol: 'https', hostname: 'picsum.photos',       pathname: '/**' },
-      { protocol: 'https', hostname: 'www.gstatic.com',     pathname: '/**' },
+      { protocol: 'https', hostname: 'www.gstatic.com',     pathname: '/**' }
     ],
   },
 
@@ -20,8 +20,9 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname),
   },
 
-  // 👇 This is the key change
-  output: 'export',
+  // 👇 Key settings for Firebase Hosting
+  output: 'export',   // replaces `next export`
+  distDir: 'out'      // ensures build output goes to /out
 };
 
 export default nextConfig;
