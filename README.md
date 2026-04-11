@@ -251,7 +251,7 @@ Both `admin` and `super_admin` see all tabs. The `isSuperAdmin` flag is passed i
 | Approve credential requests | ✅ | ✅ |
 | Approve pending visitors | ✅ | ✅ |
 | Manage visit purposes | ✅ | ✅ |
-| **Delete** users or logs | ❌ | ✅ |
+| **Delete** users or logs | ❌ | ❌ |
 | Promote / demote roles | ❌ | ✅ |
 | Manage departments | ❌ | ✅ |
 | Manage staff access | ❌ | ✅ |
